@@ -1,0 +1,2516 @@
+<!DOCTYPE html>
+<html lang="zh-Hant-HK">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>個人銀行存款及每月儲蓄追蹤系統 | Bank & Savings Tracker</title>
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Chart.js -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <!-- SheetJS (XLSX) for real Excel (.xlsx) generation & parsing -->
+  <script src="https://cdn.sheetjs.com/xlsx-0.20.2/package/dist/xlsx.full.min.js"></script>
+  <!-- Google Identity Services (GIS) for Google Drive OAuth2 -->
+  <script src="https://accounts.google.com/gsi/client" async defer></script>
+  <!-- Google Fonts: Inter & Noto Sans TC -->
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+TC:wght@400;500;700&display=swap" rel="stylesheet">
+  <style>
+    body {
+      font-family: 'Inter', 'Noto Sans TC', sans-serif;
+      background: linear-gradient(180deg, #f1f5f9 0%, #f8fafc 100%);
+      color: #0f172a;
+    }
+    /* Custom scrollbar for horizontal spreadsheet table */
+    .table-container::-webkit-scrollbar {
+      height: 8px;
+      width: 8px;
+    }
+    .table-container::-webkit-scrollbar-track {
+      background: #f1f5f9;
+      border-radius: 6px;
+    }
+    .table-container::-webkit-scrollbar-thumb {
+      background: #cbd5e1;
+      border-radius: 6px;
+    }
+    .table-container::-webkit-scrollbar-thumb:hover {
+      background: #94a3b8;
+    }
+
+    /* Sticky first column with subtle shadow */
+    .sticky-col {
+      position: sticky;
+      left: 0;
+      z-index: 10;
+      box-shadow: 2px 0 6px -2px rgba(15, 23, 42, 0.08);
+    }
+
+    /* Card elevation & hover polish */
+    .fintech-card {
+      background: #ffffff;
+      border: 1px solid rgba(226, 232, 240, 0.95);
+      box-shadow: 0 4px 20px -2px rgba(15, 23, 42, 0.04), 0 1px 3px 0 rgba(15, 23, 42, 0.02);
+      transition: transform 0.2s ease, box-shadow 0.2s ease;
+    }
+    .fintech-card:hover {
+      box-shadow: 0 10px 25px -5px rgba(15, 23, 42, 0.07), 0 4px 10px -2px rgba(15, 23, 42, 0.03);
+    }
+  </style>
+</head>
+<body class="min-h-screen flex flex-col antialiased">
+
+  <!-- Top Navigation Bar -->
+  <header class="bg-gradient-to-r from-slate-950 via-slate-900 to-slate-950 text-white shadow-lg sticky top-0 z-30 border-b border-slate-800/80">
+    <div class="max-w-[1650px] mx-auto px-4 sm:px-6 py-3.5 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3">
+      <div class="flex items-center gap-3.5">
+        <div class="w-11 h-11 rounded-2xl bg-gradient-to-br from-emerald-400 to-teal-600 flex items-center justify-center text-white font-bold text-xl shadow-lg shadow-emerald-500/20">
+          $
+        </div>
+        <div>
+          <div class="flex items-center gap-2.5">
+            <h1 class="text-lg sm:text-xl font-bold tracking-tight bg-gradient-to-r from-white to-slate-300 bg-clip-text text-transparent">
+              個人銀行存款及每月儲蓄追蹤系統
+            </h1>
+            <span class="hidden sm:inline-flex items-center px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">
+              Savings Tracker
+            </span>
+          </div>
+          <p class="text-xs text-slate-400 mt-0.5">追蹤各銀行結餘、每月淨儲蓄 (Difference) 及累計儲蓄進度</p>
+        </div>
+      </div>
+
+      <!-- Controls -->
+      <div class="flex flex-wrap items-center gap-2 sm:gap-2.5">
+        <!-- Google Drive (Apps Script Bridge) Auto-Sync Controls -->
+        <div class="flex items-center gap-1.5 bg-slate-800/95 border border-slate-700 rounded-xl p-1 shadow-inner">
+          <button id="gdriveConnectBtn" onclick="openGDriveSetupModal()" class="bg-blue-600 hover:bg-blue-500 active:scale-95 transition text-white font-semibold px-3 py-1.5 rounded-lg text-xs flex items-center gap-1.5 shadow-xs">
+            <span id="gdriveStatusDot" class="w-2 h-2 rounded-full bg-amber-300"></span>
+            <span id="gdriveStatusLabel">設定 Drive 自動同步</span>
+          </button>
+
+          <button id="gdriveSaveBtn" onclick="syncToGoogleDriveScript(true)" class="hidden bg-emerald-500 hover:bg-emerald-400 active:scale-95 transition text-slate-950 font-bold px-3 py-1.5 rounded-lg text-xs flex items-center gap-1.5 shadow-xs">
+            <span>💾 立即儲存至 Drive</span>
+          </button>
+
+          <button id="gdriveLoadBtn" onclick="loadFromGoogleDriveScript(true)" title="立即從 Google Drive 重新讀取" class="hidden bg-slate-700 hover:bg-slate-600 transition text-slate-200 font-medium px-2.5 py-1.5 rounded-lg text-xs">
+            🔄 讀取
+          </button>
+        </div>
+
+        <div class="flex items-center gap-2 bg-slate-800/90 border border-slate-700/80 rounded-xl px-3 py-2 text-xs shadow-inner">
+          <span class="w-2 h-2 rounded-full bg-amber-400"></span>
+          <span class="text-slate-300 hidden xl:inline">匯率：</span>
+          <span class="text-amber-300 font-bold">1 CAD = 6 HKD</span>
+        </div>
+
+        <button onclick="openColumnModal()" class="bg-indigo-600 hover:bg-indigo-500 active:scale-95 transition-all text-white font-semibold px-3 py-2 rounded-xl text-xs sm:text-sm flex items-center gap-1.5 shadow-md shadow-indigo-500/20">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.2" d="M9 17V7m0 10a2 2 0 01-2 2H5a2 2 0 01-2-2V7a2 2 0 012-2h2a2 2 0 012 2m0 10a2 2 0 002 2h2a2 2 0 002-2M9 7a2 2 0 012-2h2a2 2 0 012 2m0 10V7m0 10a2 2 0 002 2h2a2 2 0 002-2V7a2 2 0 00-2-2h-2a2 2 0 00-2 2"></path></svg>
+          加銀行 / 戶口 Column
+        </button>
+
+        <button onclick="openRecordModal()" class="bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-600 hover:to-teal-600 active:scale-95 transition-all text-white font-semibold px-3.5 py-2 rounded-xl text-xs sm:text-sm flex items-center gap-1.5 shadow-md shadow-emerald-500/20">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.2" d="M12 4v16m8-8H4"></path></svg>
+          新增結餘記錄
+        </button>
+
+        <div class="flex items-center gap-1.5">
+          <button onclick="exportExcelFile()" class="bg-slate-800 hover:bg-slate-700 border border-slate-700 transition text-emerald-300 font-medium px-3 py-2 rounded-xl text-xs flex items-center gap-1" title="下載真實 Excel (.xlsx) 檔案">
+            <span>⬇️ .xlsx</span>
+          </button>
+
+          <label class="cursor-pointer bg-slate-800 hover:bg-slate-700 border border-slate-700 transition text-slate-200 font-medium px-3 py-2 rounded-xl text-xs flex items-center gap-1" title="匯入 Excel (.xlsx) 或 CSV 檔案">
+            <span>⬆️ 匯入 Excel/CSV</span>
+            <input type="file" id="csvFileInput" accept=".xlsx,.xls,.csv" onchange="importFileHandler(event)" class="hidden" />
+          </label>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <!-- Main Content -->
+  <main class="flex-1 max-w-[1650px] w-full mx-auto px-4 sm:px-6 py-6 space-y-6">
+
+    <!-- Sample Data Banner -->
+    <div id="sampleBanner" class="bg-gradient-to-r from-amber-50 to-yellow-50 border border-amber-200/90 rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-xs">
+      <div class="flex items-start sm:items-center gap-3">
+        <span class="w-8 h-8 rounded-xl bg-amber-100 flex items-center justify-center text-base shrink-0">💡</span>
+        <div class="text-xs sm:text-sm text-amber-950 leading-relaxed">
+          <span class="font-bold">目前顯示示範數據 (Sample Data)：</span> 你可以隨時修改／刪除表格記錄，或撳「清空示範數據」由零開始輸入你自己嘅結餘。資料會自動同步儲存在雲端。
+        </div>
+      </div>
+      <div class="flex items-center gap-2 shrink-0">
+        <button onclick="clearRecordsOnly()" class="bg-amber-600 hover:bg-amber-700 active:scale-95 text-white text-xs font-semibold px-4 py-2 rounded-xl transition shadow-xs">
+          清空示範數據 (由零開始)
+        </button>
+      </div>
+    </div>
+
+    <!-- KPI Summary Cards (3 Cards - No Total CAD/HKD Asset Card) -->
+    <section class="grid grid-cols-1 md:grid-cols-3 gap-4 sm:gap-5">
+      <!-- Card 1: Latest Total CAD Bank Only -->
+      <div class="fintech-card rounded-2xl p-5 relative overflow-hidden flex flex-col justify-between bg-gradient-to-br from-emerald-600 via-emerald-600 to-teal-700 text-white border-none">
+        <div class="absolute -right-6 -top-6 w-28 h-28 rounded-full bg-white/10 blur-xl pointer-events-none"></div>
+        <div class="flex items-center justify-between relative z-10">
+          <span class="text-xs font-semibold tracking-wider text-emerald-50 bg-white/15 backdrop-blur-xs px-2.5 py-1 rounded-lg">
+            Total CAD Bank only
+          </span>
+          <span id="kpiLatestDate" class="text-xs text-emerald-100 font-medium">--</span>
+        </div>
+        <div class="mt-4 relative z-10">
+          <div id="kpiCadOnly" class="text-2xl sm:text-3xl font-bold tracking-tight text-white">$0.00</div>
+          <div class="flex items-baseline justify-between gap-2 mt-1.5">
+            <p class="text-xs text-emerald-100/90">最新加幣銀行戶口總結餘</p>
+            <span id="kpiCadOnlyHkdApprox" class="text-xs sm:text-sm font-semibold text-amber-200 tracking-tight">Approx. $0.00 HKD</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Card 2: Latest Period Final Net Savings (CAD) -->
+      <div class="fintech-card rounded-2xl p-5 flex flex-col justify-between">
+        <div class="flex items-center justify-between">
+          <span class="text-xs font-semibold tracking-wider text-indigo-700 bg-indigo-50 border border-indigo-200/70 px-2.5 py-1 rounded-lg">
+            最新一期 Final 淨儲蓄 (CAD)
+          </span>
+          <span id="kpiDiffBadge" class="text-xs font-semibold px-2.5 py-0.5 rounded-full bg-slate-100 text-slate-600">--</span>
+        </div>
+        <div class="mt-4">
+          <div id="kpiLatestDiff" class="text-2xl sm:text-3xl font-bold text-slate-900 tracking-tight">$0.00</div>
+          <p class="text-xs text-slate-500 mt-1.5">Final = Difference (CAD) + Correction</p>
+        </div>
+      </div>
+
+      <!-- Card 3: Cumulative Savings from 0 (Based on Final) -->
+      <div class="fintech-card rounded-2xl p-5 flex flex-col justify-between">
+        <div class="flex items-center justify-between">
+          <span class="text-xs font-semibold tracking-wider text-amber-800 bg-amber-50 border border-amber-200/70 px-2.5 py-1 rounded-lg">
+            累計儲蓄進度 (由 0 累計)
+          </span>
+          <span id="kpiTotalMonths" class="text-xs text-slate-400 font-medium">0 筆記錄</span>
+        </div>
+        <div class="mt-4">
+          <div id="kpiCumulativeDiff" class="text-2xl sm:text-3xl font-bold text-slate-900 tracking-tight">$0.00</div>
+          <p id="kpiAvgDiff" class="text-xs text-slate-500 mt-1.5">平均每期淨儲蓄 (Final): $0.00 CAD</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- Charts Section -->
+    <section class="grid grid-cols-1 lg:grid-cols-12 gap-5">
+      <!-- Chart 1: Cumulative Savings Progress starting from 0 based on Final -->
+      <div class="lg:col-span-5 fintech-card rounded-2xl p-5 flex flex-col">
+        <div class="mb-4">
+          <h2 class="text-base font-bold text-slate-800">📈 累計存款增長趨勢 (儲蓄進度)</h2>
+          <p class="text-xs text-slate-500 mt-0.5">由 <span class="font-semibold text-emerald-700">0</span> 開始，按真實日期比例拉開間距並線性連接缺失月份</p>
+        </div>
+        <div class="relative flex-1 min-h-[270px]">
+          <canvas id="growthChart"></canvas>
+        </div>
+      </div>
+
+      <!-- Chart 2: Period Final Bar Chart -->
+      <div class="lg:col-span-4 fintech-card rounded-2xl p-5 flex flex-col">
+        <div class="mb-4">
+          <h2 class="text-base font-bold text-slate-800">📊 每期淨儲蓄 / 支出 (Final)</h2>
+          <p class="text-xs text-slate-500 mt-0.5">顯示每期 <span class="font-semibold text-slate-700">Final</span> 數值（綠色為淨儲蓄，紅色為淨支出）</p>
+        </div>
+        <div class="relative flex-1 min-h-[270px]">
+          <canvas id="diffChart"></canvas>
+        </div>
+      </div>
+
+      <!-- Chart 3: Grouped Bank Distribution Doughnut Chart -->
+      <div class="lg:col-span-3 fintech-card rounded-2xl p-5 flex flex-col">
+        <div class="mb-4">
+          <h2 class="text-base font-bold text-slate-800">🍩 最新各銀行戶口分佈</h2>
+          <p class="text-xs text-slate-500 mt-0.5">按銀行合併計算 (RBC / BMO / HSBC 及新增銀行)</p>
+        </div>
+        <div class="relative flex-1 min-h-[270px] flex items-center justify-center">
+          <canvas id="distributionChart"></canvas>
+        </div>
+      </div>
+    </section>
+
+    <!-- Spreadsheet Data Table Section -->
+    <section class="fintech-card rounded-2xl overflow-hidden">
+      <div class="p-4 sm:p-5 border-b border-slate-200/80 bg-white flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+        <div>
+          <div class="flex flex-wrap items-center gap-2.5">
+            <h2 class="text-base sm:text-lg font-bold text-slate-800">📋 每月銀行結餘記錄表 (Record)</h2>
+            <span class="text-xs bg-emerald-50 text-emerald-700 border border-emerald-200 px-2.5 py-0.5 rounded-full font-semibold" id="recordCountBadge">0 筆記錄</span>
+          </div>
+          <p class="text-xs text-slate-500 mt-1.5 leading-relaxed">
+            公式說明：<span class="font-semibold text-emerald-700">Total CAD Bank only</span> = 全部加幣銀行戶口總和；
+            <span class="font-semibold text-slate-700">Difference (CAD)</span> = 本期 Total CAD − 上期 Total CAD；
+            <span class="font-semibold text-indigo-700">Final</span> = Difference (CAD) + Correction
+          </p>
+        </div>
+
+        <div class="flex flex-wrap items-center gap-2 shrink-0">
+          <button onclick="openColumnModal()" class="bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 text-xs sm:text-sm font-semibold px-3.5 py-2 rounded-xl transition flex items-center gap-1.5">
+            <span>+ 加銀行 / 戶口 Column</span>
+          </button>
+          <button onclick="openRecordModal()" class="bg-slate-900 hover:bg-slate-800 active:scale-95 text-white text-xs sm:text-sm font-semibold px-4 py-2 rounded-xl transition flex items-center gap-1.5 shadow-xs">
+            <span>+ 新增日期記錄</span>
+          </button>
+          <button onclick="confirmFullReset()" class="border border-rose-200 text-rose-600 hover:bg-rose-50 text-xs sm:text-sm font-medium px-3 py-2 rounded-xl transition">
+            重設全部
+          </button>
+        </div>
+      </div>
+
+      <!-- Bank Legend & Custom Column Manager Bar -->
+      <div id="bankLegendBar" class="px-4 sm:px-5 py-2.5 bg-slate-50/90 border-b border-slate-200/80 flex flex-wrap items-center justify-between gap-2 text-xs">
+        <!-- Populated dynamically with bank color badges -->
+      </div>
+
+      <!-- Responsive Horizontal Scroll Table -->
+      <div class="table-container overflow-x-auto">
+        <table class="w-full text-xs sm:text-sm text-right border-collapse whitespace-nowrap">
+          <thead id="recordsTableHead">
+            <!-- Dynamic Header Row injected via JS -->
+          </thead>
+          <tbody id="recordsTableBody" class="divide-y divide-slate-200 bg-white">
+            <!-- Dynamic Rows injected via JS -->
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- Modal 1: Add / Edit Balance Record (Full YYYY-MM-DD Date) -->
+  <div id="recordModal" class="fixed inset-0 bg-slate-950/60 backdrop-blur-xs z-50 hidden items-center justify-center p-4 overflow-y-auto">
+    <div class="bg-white rounded-3xl shadow-2xl max-w-4xl w-full overflow-hidden my-8 border border-slate-200">
+      <div class="bg-gradient-to-r from-slate-900 to-slate-800 text-white px-6 py-4 flex items-center justify-between">
+        <h3 id="recordModalTitle" class="text-lg font-bold">新增銀行結餘記錄</h3>
+        <button onclick="closeRecordModal()" class="w-8 h-8 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center text-slate-200 hover:text-white text-xl leading-none transition">&times;</button>
+      </div>
+
+      <form id="recordForm" onsubmit="saveRecord(event)" class="p-6 space-y-5 max-h-[82vh] overflow-y-auto">
+        <input type="hidden" id="editRecordOriginalDate" value="" />
+
+        <!-- Full Date (YYYY-MM-DD) & Copy Previous Helper -->
+        <div class="flex flex-col sm:flex-row sm:items-end justify-between gap-4 bg-slate-50 p-4 rounded-2xl border border-slate-200/80">
+          <div class="flex-1">
+            <label class="block text-xs font-bold text-slate-700 mb-1.5">日期 Date/Bank (年-月-日 YYYY-MM-DD) *</label>
+            <input type="date" id="inputDate" required class="w-full px-3.5 py-2 rounded-xl border border-slate-300 bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500/30 focus:border-emerald-500 text-sm font-semibold text-slate-800" />
+          </div>
+          <div>
+            <button type="button" onclick="prefillFromLatest()" class="w-full sm:w-auto bg-white hover:bg-emerald-50 text-slate-700 hover:text-emerald-700 border border-slate-300 hover:border-emerald-300 text-xs font-semibold px-4 py-2.5 rounded-xl transition shadow-2xs">
+              📋 複製上一期結餘數字
+            </button>
+          </div>
+        </div>
+
+        <!-- Dynamic Bank Account Inputs Grid -->
+        <div id="dynamicAccountInputsContainer" class="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <!-- Populated dynamically via JS -->
+        </div>
+
+        <!-- Correction, Live Final Preview & Comment -->
+        <div class="grid grid-cols-1 sm:grid-cols-4 gap-4 pt-1">
+          <div>
+            <label class="block text-xs font-bold text-slate-700 mb-1">Correction (正/負數調整)</label>
+            <input type="number" step="0.01" id="inputCorrection" oninput="updateLiveFinalPreview()" placeholder="0.00" class="w-full px-3 py-2 rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-emerald-500/30 focus:border-emerald-500 text-sm text-right font-medium" />
+            <span class="text-[11px] text-slate-400 mt-1 block">可輸入正數或負數 (e.g. -500)</span>
+          </div>
+          <div>
+            <label class="block text-xs font-bold text-indigo-700 mb-1">即時預覽 Final (CAD)</label>
+            <div id="liveFinalPreview" class="w-full px-3 py-2 rounded-xl border border-indigo-200 bg-indigo-50/70 text-sm text-right font-bold text-indigo-900">
+              $0.00
+            </div>
+            <span class="text-[11px] text-indigo-500 mt-1 block">自動計：Difference + Correction</span>
+          </div>
+          <div class="sm:col-span-2">
+            <label class="block text-xs font-bold text-slate-700 mb-1">Comment (備註)</label>
+            <input type="text" id="inputComment" placeholder="例如：出糧、交稅、供 TFSA、買機票..." class="w-full px-3 py-2 rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-emerald-500/30 focus:border-emerald-500 text-sm" />
+          </div>
+        </div>
+
+        <div class="flex items-center justify-end gap-3 pt-4 border-t border-slate-200">
+          <button type="button" onclick="closeRecordModal()" class="px-4 py-2 rounded-xl text-sm font-medium text-slate-600 hover:bg-slate-100 transition">取消</button>
+          <button type="submit" class="px-6 py-2.5 rounded-xl text-sm font-semibold bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white shadow-md shadow-emerald-600/20 transition">儲存記錄</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Modal 2: Add New Bank or Account Column -->
+  <div id="columnModal" class="fixed inset-0 bg-slate-950/60 backdrop-blur-xs z-50 hidden items-center justify-center p-4 overflow-y-auto">
+    <div class="bg-white rounded-3xl shadow-2xl max-w-lg w-full overflow-hidden my-8 border border-slate-200">
+      <div class="bg-gradient-to-r from-indigo-900 to-slate-900 text-white px-6 py-4 flex items-center justify-between">
+        <h3 class="text-lg font-bold">加銀行 / 戶口欄位 (Add Column)</h3>
+        <button onclick="closeColumnModal()" class="w-8 h-8 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center text-slate-200 hover:text-white text-xl leading-none transition">&times;</button>
+      </div>
+
+      <form onsubmit="handleAddColumn(event)" class="p-6 space-y-4">
+        <!-- Mode Selection -->
+        <div>
+          <label class="block text-xs font-bold text-slate-700 mb-2">請選擇新增方式：</label>
+          <div class="grid grid-cols-2 gap-2.5">
+            <label class="cursor-pointer">
+              <input type="radio" name="colAddMode" value="new_bank" checked onchange="toggleColAddMode()" class="peer sr-only" />
+              <div class="p-3 rounded-xl border-2 border-slate-200 peer-checked:border-indigo-600 peer-checked:bg-indigo-50/60 transition text-center">
+                <div class="text-xs font-bold text-slate-900">🏦 新增一間新銀行</div>
+                <div class="text-[11px] text-slate-500 mt-0.5">自動配搭全新專屬顏色</div>
+              </div>
+            </label>
+            <label class="cursor-pointer">
+              <input type="radio" name="colAddMode" value="existing_bank" onchange="toggleColAddMode()" class="peer sr-only" />
+              <div class="p-3 rounded-xl border-2 border-slate-200 peer-checked:border-indigo-600 peer-checked:bg-indigo-50/60 transition text-center">
+                <div class="text-xs font-bold text-slate-900">➕ 現有銀行加新戶口</div>
+                <div class="text-[11px] text-slate-500 mt-0.5">沿用同一間銀行顏色</div>
+              </div>
+            </label>
+          </div>
+        </div>
+
+        <!-- Option A: New Bank Name + Auto Color Preview -->
+        <div id="newBankFields" class="space-y-3 bg-slate-50 p-4 rounded-2xl border border-slate-200">
+          <div>
+            <label class="block text-xs font-bold text-slate-700 mb-1">新銀行名稱 (Bank Name) *</label>
+            <input type="text" id="newBankNameInput" placeholder="例如：TD、CIBC、EQ Bank、Scotiabank" class="w-full px-3.5 py-2 rounded-xl border border-slate-300 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-500 text-sm" />
+          </div>
+          <div class="flex items-center justify-between text-xs">
+            <span class="text-slate-600 font-medium">系統自動配搭顏色預覽：</span>
+            <span id="newBankColorPreview" class="px-3 py-1 rounded-lg font-bold border border-black/10">新銀行預覽色</span>
+          </div>
+        </div>
+
+        <!-- Option B: Existing Bank Selector -->
+        <div id="existingBankFields" class="hidden space-y-3 bg-slate-50 p-4 rounded-2xl border border-slate-200">
+          <div>
+            <label class="block text-xs font-bold text-slate-700 mb-1">選擇現有銀行 (自動沿用同色) *</label>
+            <select id="existingBankSelect" onchange="updateExistingBankPreview()" class="w-full px-3.5 py-2 rounded-xl border border-slate-300 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-500 text-sm font-medium">
+              <!-- Populated dynamically -->
+            </select>
+          </div>
+          <div class="flex items-center justify-between text-xs">
+            <span class="text-slate-600 font-medium">繼承該銀行專屬底色：</span>
+            <span id="existingBankColorPreview" class="px-3 py-1 rounded-lg font-bold border border-black/10">--</span>
+          </div>
+        </div>
+
+        <!-- Account Column Name & Currency -->
+        <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <div class="sm:col-span-2">
+            <label class="block text-xs font-bold text-slate-700 mb-1">戶口欄位名稱 (Column Name) *</label>
+            <input type="text" id="newAccountNameInput" required placeholder="例如：TD Cheq、RBC TFSA" class="w-full px-3.5 py-2 rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-500 text-sm" />
+          </div>
+          <div>
+            <label class="block text-xs font-bold text-slate-700 mb-1">貨幣 (Currency)</label>
+            <select id="newAccountCurrencySelect" class="w-full px-3 py-2 rounded-xl border border-slate-300 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-500 text-sm font-semibold">
+              <option value="CAD">CAD ($)</option>
+              <option value="HKD">HKD (HK$)</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- Manage Existing Custom Columns List -->
+        <div id="customColumnsManageSection" class="hidden pt-2 border-t border-slate-200 space-y-2">
+          <div class="text-xs font-bold text-slate-700">已新增的自訂欄位（按 &times; 可移除）：</div>
+          <div id="customColumnsList" class="flex flex-wrap gap-1.5"></div>
+        </div>
+
+        <div class="flex items-center justify-end gap-3 pt-4 border-t border-slate-200">
+          <button type="button" onclick="closeColumnModal()" class="px-4 py-2 rounded-xl text-sm font-medium text-slate-600 hover:bg-slate-100 transition">取消</button>
+          <button type="submit" class="px-6 py-2.5 rounded-xl text-sm font-semibold bg-indigo-600 hover:bg-indigo-700 text-white shadow-md shadow-indigo-600/20 transition">確認新增欄位</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Confirm Dialog Modal -->
+  <div id="confirmDialog" class="fixed inset-0 bg-slate-950/60 backdrop-blur-xs z-50 hidden items-center justify-center p-4">
+    <div class="bg-white rounded-2xl shadow-2xl max-w-sm w-full p-6 space-y-4 border border-slate-200">
+      <h3 id="confirmTitle" class="text-base font-bold text-slate-900">確認操作</h3>
+      <p id="confirmMessage" class="text-sm text-slate-600 leading-relaxed">確定要執行此操作嗎？</p>
+      <div class="flex items-center justify-end gap-2.5 pt-2">
+        <button type="button" onclick="closeConfirmDialog()" class="px-4 py-2 rounded-xl text-xs font-semibold text-slate-600 hover:bg-slate-100 transition">取消</button>
+        <button type="button" id="confirmActionBtn" class="px-4 py-2 rounded-xl text-xs font-semibold bg-rose-600 hover:bg-rose-700 text-white transition">確定</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal 3: Google Apps Script Bridge Setup (Works 100% inside Google Sites) -->
+  <div id="gdriveSetupModal" class="fixed inset-0 bg-slate-950/60 backdrop-blur-xs z-50 hidden items-center justify-center p-4 overflow-y-auto">
+    <div class="bg-white rounded-3xl shadow-2xl max-w-2xl w-full overflow-hidden my-8 border border-slate-200">
+      <div class="bg-gradient-to-r from-blue-900 to-slate-900 text-white px-6 py-4 flex items-center justify-between">
+        <h3 class="text-lg font-bold flex items-center gap-2">
+          <span>☁️ Google Drive 自動讀寫設定 (支援 Google Sites)</span>
+        </h3>
+        <button onclick="closeGDriveSetupModal()" class="w-8 h-8 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center text-slate-200 hover:text-white text-xl leading-none transition">&times;</button>
+      </div>
+
+      <div class="p-6 space-y-4 max-h-[82vh] overflow-y-auto text-sm">
+        <div class="bg-emerald-50 border border-emerald-200 rounded-2xl p-4 text-xs text-emerald-950 space-y-1 leading-relaxed">
+          <div class="font-bold text-sm text-emerald-900">✅ 專為 Google Sites 設計（免登入、無 OAuth 封鎖）：</div>
+          <p>只要將下面段短代碼貼去你 Google Drive 嘅 <strong>Apps Script</strong> 並發布成 Web App，之後每次你打開 Google Sites 都會<strong>自動讀取</strong>你 Google Drive 個試算表／Excel 檔，每次改動亦會<strong>自動即時儲存</strong>！</p>
+        </div>
+
+        <div>
+          <label class="block text-xs font-bold text-slate-700 mb-1.5">貼上你嘅 Google Apps Script Web App URL *</label>
+          <input type="url" id="gasWebAppUrlInput" placeholder="https://script.google.com/macros/s/AKfycb.../exec" class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-blue-500/30 focus:border-blue-500 text-xs font-mono" />
+        </div>
+
+        <div class="bg-slate-50 border border-slate-200 rounded-2xl p-4 text-xs text-slate-700 space-y-2.5">
+          <div class="flex items-center justify-between">
+            <span class="font-bold text-slate-900">📋 1 分鐘設定步驟：</span>
+            <button type="button" onclick="copyAppsScriptCode()" class="bg-slate-900 hover:bg-slate-800 text-white px-3 py-1 rounded-lg text-[11px] font-semibold transition">
+              複製 Apps Script 代碼
+            </button>
+          </div>
+          <ol class="list-decimal list-inside space-y-1 text-slate-600 leading-relaxed">
+            <li>打開你 Google Drive，新增一個 <strong>Google 試算表 (Google Sheets)</strong>（或打開你現有嗰個 Excel/試算表）。</li>
+            <li>喺頂部選單按 <strong>擴充功能 (Extensions) &gt; Apps Script</strong>。</li>
+            <li>清空入面原有文字，貼上右上方複製嘅代碼，按「儲存」。</li>
+            <li>按右上角藍色 <strong>部署 (Deploy) &gt; 新增部署作業 (New deployment)</strong>。</li>
+            <li>類型揀 <strong>網頁應用程式 (Web app)</strong>，執行身分揀「<strong>我 (Me)</strong>」，誰可以存取揀「<strong>所有人 (Anyone)</strong>」，按部署並複製產生出嚟嘅 <strong>Web app URL</strong> 貼入上面輸入框即可！</li>
+          </ol>
+          <pre id="appsScriptSnippet" class="bg-slate-900 text-emerald-300 p-3 rounded-xl text-[11px] font-mono overflow-x-auto leading-relaxed select-all">function doGet(e) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName('DataStore') || ss.insertSheet('DataStore');
+  var val = String(sheet.getRange('A1').getValue() || '{}');
+  var callback = e &amp;&amp; e.parameter &amp;&amp; e.parameter.callback;
+  if (callback) {
+    var safeCallback = String(callback).replace(/[^a-zA-Z0-9_$]/g, '');
+    return ContentService.createTextOutput(safeCallback + '(' + val + ')').setMimeType(ContentService.MimeType.JAVASCRIPT);
+  }
+  return ContentService.createTextOutput(val).setMimeType(ContentService.MimeType.JSON);
+}
+
+function doPost(e) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var store = ss.getSheetByName('DataStore') || ss.insertSheet('DataStore');
+  var raw = (e &amp;&amp; e.postData &amp;&amp; e.postData.contents) ? String(e.postData.contents) : '{}';
+  store.getRange('A1').setValue(raw);
+
+  // 同時自動更新可視化 Record 工作表，方便你隨時喺 Drive 直接打開或下載成 Excel (.xlsx)
+  try {
+    var payload = JSON.parse(raw);
+    if (payload.tableRows &amp;&amp; payload.tableRows.length &gt; 0) {
+      var recSheet = ss.getSheetByName('Record') || ss.insertSheet('Record');
+      recSheet.clearContents();
+      recSheet.getRange(1, 1, payload.tableRows.length, payload.tableRows[0].length).setValues(payload.tableRows);
+    }
+  } catch (err) {}
+
+  return ContentService.createTextOutput(JSON.stringify({ ok: true })).setMimeType(ContentService.MimeType.JSON);
+}</pre>
+        </div>
+
+        <div class="flex items-center justify-between pt-3 border-t border-slate-200">
+          <button type="button" onclick="disconnectGoogleDrive()" class="text-xs text-rose-600 hover:underline font-medium">清除同步網址</button>
+          <div class="flex items-center gap-2">
+            <button type="button" onclick="closeGDriveSetupModal()" class="px-4 py-2 rounded-xl text-xs font-medium text-slate-600 hover:bg-slate-100 transition">取消</button>
+            <button type="button" onclick="saveGDriveConfigAndConnect()" class="px-5 py-2.5 rounded-xl text-xs font-semibold bg-blue-600 hover:bg-blue-700 text-white shadow-md shadow-blue-600/20 transition">儲存並立即同步</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast Notification -->
+  <div id="toast" class="fixed bottom-5 right-5 bg-slate-900 text-white text-sm font-medium px-4 py-3 rounded-2xl shadow-xl border border-slate-700 transform translate-y-20 opacity-0 transition-all duration-300 z-50">
+    已儲存！
+  </div>
+
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+    import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+    import { getFirestore, doc, setDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+    // ==========================================
+    // 1. State Management, Bank Colors & Schema
+    // ==========================================
+    const FIXED_HKD_TO_CAD_RATE = 6; // Fixed 1 CAD = 6 HKD for pie chart proportion
+
+    const BANK_COLOR_PALETTE = [
+      { headerBg: '#fef08a', headerText: '#713f12', cellBg: 'rgba(254, 249, 195, 0.45)', chartColor: '#eab308' }, // 0: RBC Yellow
+      { headerBg: '#bae6fd', headerText: '#0c4a6e', cellBg: 'rgba(224, 242, 254, 0.45)', chartColor: '#0284c7' }, // 1: BMO Light Blue
+      { headerBg: '#fecaca', headerText: '#7f1d1d', cellBg: 'rgba(254, 226, 226, 0.45)', chartColor: '#dc2626' }, // 2: HSBC Red
+      { headerBg: '#ddd6fe', headerText: '#4c1d95', cellBg: 'rgba(237, 233, 254, 0.45)', chartColor: '#7c3aed' }, // 3: Purple
+      { headerBg: '#fed7aa', headerText: '#7c2d12', cellBg: 'rgba(255, 237, 213, 0.45)', chartColor: '#ea580c' }, // 4: Orange
+      { headerBg: '#fbcfe8', headerText: '#831843', cellBg: 'rgba(252, 231, 243, 0.45)', chartColor: '#db2777' }, // 5: Pink
+      { headerBg: '#99f6e4', headerText: '#134e4a', cellBg: 'rgba(204, 251, 241, 0.45)', chartColor: '#0d9488' }  // 6: Teal
+    ];
+
+    const DEFAULT_BANKS = [
+      { id: 'RBC', name: 'RBC', colorIndex: 0 },
+      { id: 'BMO', name: 'BMO', colorIndex: 1 },
+      { id: 'HSBC', name: 'HSBC', colorIndex: 2 }
+    ];
+
+    const DEFAULT_COLUMNS = [
+      { id: 'rbc_cheq', bankId: 'RBC', name: 'RBC', currency: 'CAD', isDefault: true },
+      { id: 'rbc_saving', bankId: 'RBC', name: 'RBC Saving', currency: 'CAD', isDefault: true },
+      { id: 'bmo_cheq', bankId: 'BMO', name: 'BMO Cheq', currency: 'CAD', isDefault: true },
+      { id: 'bmo_saving', bankId: 'BMO', name: 'BMO Saving', currency: 'CAD', isDefault: true },
+      { id: 'bmo_tfsa', bankId: 'BMO', name: 'BMO TFSA', currency: 'CAD', isDefault: true },
+      { id: 'bmo_fhsa', bankId: 'BMO', name: 'BMO FHSA', currency: 'CAD', isDefault: true },
+      { id: 'hk_hsbc', bankId: 'HSBC', name: 'HK HSBC', currency: 'HKD', isDefault: true }
+    ];
+
+    const SAMPLE_RECORDS = [
+      {
+        date: '2026-01-31',
+        balances: { rbc_cheq: 3200, rbc_saving: 5000, bmo_cheq: 2100, bmo_saving: 4000, bmo_tfsa: 12000, bmo_fhsa: 8000, hk_hsbc: 45000 },
+        correction: 0,
+        comment: '起始基準月份'
+      },
+      {
+        date: '2026-02-28',
+        balances: { rbc_cheq: 3500, rbc_saving: 5500, bmo_cheq: 2400, bmo_saving: 4200, bmo_tfsa: 12500, bmo_fhsa: 8500, hk_hsbc: 45000 },
+        correction: 0,
+        comment: '正常儲蓄'
+      },
+      {
+        date: '2026-03-31',
+        balances: { rbc_cheq: 3100, rbc_saving: 6000, bmo_cheq: 2200, bmo_saving: 4500, bmo_tfsa: 13000, bmo_fhsa: 9000, hk_hsbc: 44500 },
+        correction: 300,
+        comment: '交車保調整'
+      }
+    ];
+
+    let banks = JSON.parse(JSON.stringify(DEFAULT_BANKS));
+    let accountColumns = JSON.parse(JSON.stringify(DEFAULT_COLUMNS));
+    let records = JSON.parse(JSON.stringify(SAMPLE_RECORDS));
+    let meta = { isSample: true };
+
+    let growthChartInstance = null;
+    let diffChartInstance = null;
+    let distChartInstance = null;
+
+    function updateSyncStatus(status, text) {
+      // Safe status handler
+    }
+
+    // Cloud & persistent storage state
+    const LOCAL_STORAGE_KEY = 'savings_tracker_persistent_v1';
+    const GAS_URL_STORAGE_KEY = 'savings_tracker_gas_url_v1';
+    let db = null;
+    let auth = null;
+    let currentUser = null;
+    let appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+    let unsubscribeCloud = null;
+    let isCloudReady = false;
+
+    // Google Apps Script Web App URL (bypasses Google Sites IFrame OAuth block)
+    let gasWebAppUrl = '';
+
+    function loadGDriveConfig() {
+      try {
+        gasWebAppUrl = localStorage.getItem(GAS_URL_STORAGE_KEY) || '';
+      } catch (e) {}
+    }
+
+    function saveGDriveConfig() {
+      try {
+        localStorage.setItem(GAS_URL_STORAGE_KEY, gasWebAppUrl);
+      } catch (e) {}
+    }
+
+    function updateGDriveUI(state = 'idle', customText = '') {
+      const statusLabel = document.getElementById('gdriveStatusLabel');
+      const statusDot = document.getElementById('gdriveStatusDot');
+      const connectBtn = document.getElementById('gdriveConnectBtn');
+      const saveBtn = document.getElementById('gdriveSaveBtn');
+      const loadBtn = document.getElementById('gdriveLoadBtn');
+      if (!statusLabel) return;
+
+      if (gasWebAppUrl) {
+        saveBtn.classList.remove('hidden');
+        loadBtn.classList.remove('hidden');
+        connectBtn.className = 'bg-slate-700 hover:bg-slate-600 transition text-emerald-300 font-semibold px-3 py-1.5 rounded-lg text-xs flex items-center gap-1.5';
+        if (state === 'syncing') {
+          statusDot.className = 'w-2 h-2 rounded-full bg-amber-400 animate-ping';
+          statusLabel.textContent = customText || '正在同步 Drive...';
+        } else if (state === 'error') {
+          statusDot.className = 'w-2 h-2 rounded-full bg-rose-400';
+          statusLabel.textContent = customText || 'Drive 同步異常 (按此檢查)';
+        } else {
+          statusDot.className = 'w-2 h-2 rounded-full bg-emerald-400';
+          statusLabel.textContent = customText || 'Drive 自動同步已啟用';
+        }
+      } else {
+        saveBtn.classList.add('hidden');
+        loadBtn.classList.add('hidden');
+        connectBtn.className = 'bg-blue-600 hover:bg-blue-500 active:scale-95 transition text-white font-semibold px-3 py-1.5 rounded-lg text-xs flex items-center gap-1.5 shadow-xs';
+        statusDot.className = 'w-2 h-2 rounded-full bg-amber-300';
+        statusLabel.textContent = '設定 Drive 自動同步';
+      }
+    }
+
+    // ==========================================
+    // 2. Initialization & Auto-Save Persistence
+    // ==========================================
+    function loadFromLocalCache() {
+      try {
+        const raw = localStorage.getItem(LOCAL_STORAGE_KEY);
+        if (!raw) return false;
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed.banks)) banks = parsed.banks;
+        if (Array.isArray(parsed.accountColumns)) accountColumns = parsed.accountColumns;
+        if (Array.isArray(parsed.records)) records = parsed.records;
+        if (parsed.meta && typeof parsed.meta === 'object') meta = parsed.meta;
+        return true;
+      } catch (e) {
+        return false;
+      }
+    }
+
+    function saveToLocalCache() {
+      try {
+        localStorage.setItem(
+          LOCAL_STORAGE_KEY,
+          JSON.stringify({
+            banks,
+            accountColumns,
+            records,
+            meta,
+            updatedAt: Date.now()
+          })
+        );
+        return true;
+      } catch (e) {
+        return false;
+      }
+    }
+
+    async function initApp() {
+      loadGDriveConfig();
+      const hasLocal = loadFromLocalCache();
+      renderAll();
+      updateGDriveUI();
+
+      // Auto-read from Google Drive sheet/Excel on every page open if configured
+      if (gasWebAppUrl) {
+        let loaded = false;
+        for (let attempt = 1; attempt <= 2; attempt++) {
+          loaded = await loadFromGoogleDriveScript(false);
+          if (loaded) break;
+          await new Promise(r => setTimeout(r, 700));
+        }
+        if (!loaded && hasLocal) {
+          updateGDriveUI('error', '重開讀取失敗 (按讀取重試)');
+        }
+      }
+
+      try {
+        if (typeof __firebase_config === 'undefined') {
+          updateSyncStatus('synced', hasLocal ? '已自動本機儲存' : '自動儲存就緒');
+          return;
+        }
+
+        const firebaseConfig = JSON.parse(__firebase_config);
+        const app = initializeApp(firebaseConfig);
+        db = getFirestore(app);
+        auth = getAuth(app);
+
+        // Authenticate FIRST before any Firestore access
+        if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+          await signInWithCustomToken(auth, __initial_auth_token);
+        } else {
+          await signInAnonymously(auth);
+        }
+
+        onAuthStateChanged(auth, (user) => {
+          currentUser = user;
+          if (!user) return;
+          subscribeToUserCloudData(user.uid);
+        });
+      } catch (e) {
+        console.error('Cloud init fallback to local:', e);
+        updateSyncStatus('synced', '已自動本機儲存');
+      }
+    }
+
+    function subscribeToUserCloudData(userId) {
+      if (!db || !userId) return;
+      if (unsubscribeCloud) unsubscribeCloud();
+
+      const stateDocRef = doc(db, 'artifacts', appId, 'users', userId, 'savingsTracker', 'mainState');
+
+      unsubscribeCloud = onSnapshot(
+        stateDocRef,
+        async (snap) => {
+          if (snap.exists()) {
+            const data = snap.data();
+            if (Array.isArray(data.banks)) banks = data.banks;
+            if (Array.isArray(data.accountColumns)) accountColumns = data.accountColumns;
+            if (Array.isArray(data.records)) records = data.records;
+            if (data.meta && typeof data.meta === 'object') meta = data.meta;
+            isCloudReady = true;
+            saveToLocalCache();
+            updateSyncStatus('synced', '雲端與本機已自動儲存');
+            renderAll();
+          } else {
+            // Initialize cloud document on first visit
+            isCloudReady = true;
+            await saveAllState(true);
+          }
+        },
+        (error) => {
+          console.error('Cloud snapshot fallback to local:', error);
+          updateSyncStatus('synced', '已自動本機儲存');
+        }
+      );
+    }
+
+    async function saveAllState(isInitial = false) {
+      // Always save immediately to persistent browser storage first
+      const localOk = saveToLocalCache();
+
+      // Automatically push changes to Google Drive if Apps Script URL is set
+      if (gasWebAppUrl && !isInitial) {
+        syncToGoogleDriveScript(false);
+      }
+
+      if (!db || !currentUser) {
+        if (localOk) {
+          updateSyncStatus('synced', '已自動儲存');
+        }
+        return;
+      }
+
+      try {
+        const stateDocRef = doc(db, 'artifacts', appId, 'users', currentUser.uid, 'savingsTracker', 'mainState');
+        await setDoc(stateDocRef, {
+          banks,
+          accountColumns,
+          records,
+          meta,
+          updatedAt: Date.now()
+        });
+        updateSyncStatus('synced', '雲端與本機已自動儲存');
+      } catch (e) {
+        console.error('Cloud save fallback to local:', e);
+        updateSyncStatus('synced', '已自動本機儲存');
+      }
+    }
+
+    async function syncToGoogleDriveScript(notifyUser = true) {
+      if (!gasWebAppUrl) {
+        openGDriveSetupModal();
+        return;
+      }
+
+      updateGDriveUI('syncing', '正在儲存至 Drive...');
+      try {
+        const computed = computeMetrics();
+        const orderedCols = getOrderedColumns();
+        const headers = [
+          'Date/Bank',
+          ...orderedCols.map(c => `${c.name} (${c.currency})`),
+          'Total CAD Bank only',
+          'Difference (CAD)',
+          'Correction',
+          'Final',
+          'Comment'
+        ];
+        const tableRows = [
+          headers,
+          ...computed.map(r => [
+            r.date,
+            ...orderedCols.map(c => Number((Number(r.balances[c.id]) || 0).toFixed(2))),
+            Number(r.totalCadBankOnly.toFixed(2)),
+            Number(r.differenceCad.toFixed(2)),
+            Number(r.correction.toFixed(2)),
+            Number(r.finalCad.toFixed(2)),
+            r.comment || ''
+          ])
+        ];
+
+        const payload = JSON.stringify({
+          banks,
+          accountColumns,
+          records,
+          meta,
+          tableRows,
+          updatedAt: Date.now()
+        });
+
+        await fetch(gasWebAppUrl, {
+          method: 'POST',
+          mode: 'no-cors',
+          headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+          body: payload
+        });
+
+        updateGDriveUI('idle', 'Drive 已自動同步 ✓');
+        if (notifyUser) {
+          showToast('☁️ 已成功儲存並更新 Google Drive 試算表！');
+        }
+      } catch (err) {
+        console.error('Drive script sync error:', err);
+        updateGDriveUI('error', 'Drive 同步失敗');
+        if (notifyUser) {
+          showToast('同步至 Drive 失敗，請檢查 Apps Script 網址');
+        }
+      }
+    }
+
+    function fetchJsonpFromAppsScript(baseUrl) {
+      return new Promise((resolve, reject) => {
+        const cbName = '__gas_cb_' + Date.now() + '_' + Math.floor(Math.random() * 10000);
+        const script = document.createElement('script');
+        let settled = false;
+
+        const cleanup = () => {
+          if (script.parentNode) script.parentNode.removeChild(script);
+          try { delete window[cbName]; } catch (e) { window[cbName] = undefined; }
+        };
+
+        const timer = setTimeout(() => {
+          if (settled) return;
+          settled = true;
+          cleanup();
+          reject(new Error('讀取逾時，請檢查網址是否為 Web app URL (/exec)'));
+        }, 15000);
+
+        window[cbName] = (data) => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(timer);
+          cleanup();
+          resolve(data);
+        };
+
+        script.onerror = () => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(timer);
+          cleanup();
+          reject(new Error('無法載入 Script，請確認已部署新版本並設為「所有人」'));
+        };
+
+        const sep = baseUrl.includes('?') ? '&' : '?';
+        script.src = `${baseUrl}${sep}callback=${encodeURIComponent(cbName)}&t=${Date.now()}`;
+        (document.head || document.body || document.documentElement).appendChild(script);
+      });
+    }
+
+    async function loadFromGoogleDriveScript(notifyUser = true) {
+      if (!gasWebAppUrl) {
+        if (notifyUser) openGDriveSetupModal();
+        return false;
+      }
+
+      updateGDriveUI('syncing', '正在讀取 Drive...');
+      try {
+        let data = await fetchJsonpFromAppsScript(gasWebAppUrl);
+        if (typeof data === 'string') {
+          try { data = JSON.parse(data); } catch (e) {}
+        }
+
+        if (data && Array.isArray(data.records)) {
+          if (Array.isArray(data.banks)) banks = data.banks;
+          if (Array.isArray(data.accountColumns)) accountColumns = data.accountColumns;
+          records = data.records;
+          if (data.meta && typeof data.meta === 'object') meta = data.meta;
+          saveToLocalCache();
+          renderAll();
+          updateGDriveUI('idle', 'Drive 已自動同步 ✓');
+          if (notifyUser) {
+            showToast(`☁️ 已從 Google Drive 自動讀取 ${records.length} 筆記錄！`);
+          }
+          return true;
+        } else {
+          // Drive sheet is empty on first run -> push current local data to initialize it
+          updateGDriveUI('idle', 'Drive 已連線 (準備就緒)');
+          if (records.length > 0) {
+            await syncToGoogleDriveScript(false);
+          }
+          if (notifyUser) {
+            showToast('已連接 Google Drive，並已同步現有資料！');
+          }
+          return true;
+        }
+      } catch (err) {
+        console.error('Drive script load error:', err);
+        updateGDriveUI('error', 'Drive 讀取失敗');
+        if (notifyUser) {
+          showToast(err.message || '讀取失敗：請確認 Apps Script 已部署新版本');
+        }
+        return false;
+      }
+    }
+
+    function openGDriveSetupModal() {
+      document.getElementById('gasWebAppUrlInput').value = gasWebAppUrl || '';
+      const modal = document.getElementById('gdriveSetupModal');
+      modal.classList.remove('hidden');
+      modal.classList.add('flex');
+    }
+
+    function closeGDriveSetupModal() {
+      const modal = document.getElementById('gdriveSetupModal');
+      modal.classList.add('hidden');
+      modal.classList.remove('flex');
+    }
+
+    function copyAppsScriptCode() {
+      const code = document.getElementById('appsScriptSnippet').textContent;
+      const ta = document.createElement('textarea');
+      ta.value = code;
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand('copy');
+      document.body.removeChild(ta);
+      showToast('已複製 Apps Script 代碼！');
+    }
+
+    async function saveGDriveConfigAndConnect() {
+      const urlVal = document.getElementById('gasWebAppUrlInput').value.trim();
+      if (!urlVal || !urlVal.startsWith('https://script.google.com/')) {
+        showToast('請輸入正確嘅 https://script.google.com/.../exec 網址');
+        return;
+      }
+
+      gasWebAppUrl = urlVal;
+      saveGDriveConfig();
+      updateGDriveUI('syncing');
+      closeGDriveSetupModal();
+      await loadFromGoogleDriveScript(true);
+    }
+
+    function disconnectGoogleDrive() {
+      gasWebAppUrl = '';
+      saveGDriveConfig();
+      updateGDriveUI();
+      closeGDriveSetupModal();
+      showToast('已清除 Google Drive 同步網址');
+    }
+
+    function getBankById(bankId) {
+      return banks.find(b => b.id === bankId) || { id: bankId, name: bankId, colorIndex: 0 };
+    }
+
+    function getBankTheme(bankId) {
+      const bank = getBankById(bankId);
+      return BANK_COLOR_PALETTE[bank.colorIndex % BANK_COLOR_PALETTE.length];
+    }
+
+    // Order columns grouped by bank order so same-bank accounts always appear side-by-side
+    function getOrderedColumns() {
+      const ordered = [];
+      banks.forEach(bank => {
+        const colsForBank = accountColumns.filter(c => c.bankId === bank.id);
+        ordered.push(...colsForBank);
+      });
+      return ordered;
+    }
+
+    // ==========================================
+    // 3. Financial Calculations
+    // ==========================================
+    function computeMetrics() {
+      const sorted = [...records].sort((a, b) => a.date.localeCompare(b.date));
+      const orderedCols = getOrderedColumns();
+
+      let runningCumulativeSavings = 0; // Starts from 0 and accumulates Final sequentially
+
+      return sorted.map((rec, index) => {
+        const balances = rec.balances || {};
+        const correction = Number(rec.correction) || 0;
+
+        // Sum all CAD columns for Total CAD Bank only
+        let totalCadBankOnly = 0;
+        orderedCols.forEach(col => {
+          const val = Number(balances[col.id]) || 0;
+          if (col.currency === 'CAD') {
+            totalCadBankOnly += val;
+          }
+        });
+
+        // Raw Difference (CAD) = Current Total CAD Bank only - Previous Total CAD Bank only
+        let differenceCad = 0;
+        if (index > 0) {
+          const prevRec = sorted[index - 1];
+          const prevBalances = prevRec.balances || {};
+          let prevTotalCadOnly = 0;
+          orderedCols.forEach(col => {
+            if (col.currency === 'CAD') {
+              prevTotalCadOnly += (Number(prevBalances[col.id]) || 0);
+            }
+          });
+          differenceCad = totalCadBankOnly - prevTotalCadOnly;
+        } else {
+          differenceCad = 0;
+        }
+
+        // Final = Difference (CAD) + Correction
+        const finalCad = differenceCad + correction;
+
+        // Accumulate from 0 based strictly on Final (CAD)
+        runningCumulativeSavings += finalCad;
+
+        return {
+          ...rec,
+          balances,
+          correction,
+          totalCadBankOnly,
+          differenceCad,
+          finalCad,
+          cumulativeSavingsFromZero: runningCumulativeSavings,
+          isFirstRow: index === 0
+        };
+      });
+    }
+
+    function formatMoney(num, prefix = '$') {
+      const sign = num < 0 ? '-' : '';
+      const absVal = Math.abs(num).toLocaleString('en-CA', {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2
+      });
+      return `${sign}${prefix}${absVal}`;
+    }
+
+    function formatDiff(num) {
+      const sign = num > 0 ? '+' : (num < 0 ? '-' : '');
+      const absVal = Math.abs(num).toLocaleString('en-CA', {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2
+      });
+      return `${sign}$${absVal}`;
+    }
+
+    // ==========================================
+    // 4. UI Rendering (KPIs, Legend, Table, Charts)
+    // ==========================================
+    function renderAll() {
+      const computed = computeMetrics();
+
+      const banner = document.getElementById('sampleBanner');
+      if (meta.isSample && records.length > 0) {
+        banner.classList.remove('hidden');
+      } else {
+        banner.classList.add('hidden');
+      }
+
+      renderBankLegend();
+      renderKPIs(computed);
+      renderTable(computed);
+      renderCharts(computed);
+    }
+
+    function renderBankLegend() {
+      const legendBar = document.getElementById('bankLegendBar');
+      const badgesHtml = banks.map(bank => {
+        const theme = getBankTheme(bank.id);
+        const colCount = accountColumns.filter(c => c.bankId === bank.id).length;
+        return `
+          <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg font-semibold border border-black/10 shadow-2xs"
+                style="background-color: ${theme.headerBg}; color: ${theme.headerText};">
+            <span class="w-2 h-2 rounded-full" style="background-color: ${theme.headerText};"></span>
+            ${escapeHtml(bank.name)} (${colCount} 個戶口)
+          </span>
+        `;
+      }).join('');
+
+      legendBar.innerHTML = `
+        <div class="flex flex-wrap items-center gap-2">
+          <span class="text-slate-500 font-semibold">銀行顏色分類：</span>
+          ${badgesHtml}
+          <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg font-semibold border border-emerald-300 bg-emerald-200 text-emerald-950">
+            Total CAD Bank only (加幣總和)
+          </span>
+        </div>
+        <div class="text-[11px] text-slate-400">
+          同銀行不同戶口會自動共用同一顏色
+        </div>
+      `;
+    }
+
+    function renderKPIs(data) {
+      document.getElementById('recordCountBadge').textContent = `${data.length} 筆記錄`;
+      document.getElementById('kpiTotalMonths').textContent = `${data.length} 筆記錄`;
+
+      if (data.length === 0) {
+        document.getElementById('kpiLatestDate').textContent = '無資料';
+        document.getElementById('kpiCadOnly').textContent = '$0.00';
+        document.getElementById('kpiCadOnlyHkdApprox').textContent = 'Approx. $0.00 HKD';
+        document.getElementById('kpiLatestDiff').textContent = '$0.00';
+        document.getElementById('kpiLatestDiff').className = 'text-2xl sm:text-3xl font-bold text-slate-900';
+        document.getElementById('kpiDiffBadge').textContent = '--';
+        document.getElementById('kpiDiffBadge').className = 'text-xs font-semibold px-2.5 py-0.5 rounded-full bg-slate-100 text-slate-600';
+        document.getElementById('kpiCumulativeDiff').textContent = '$0.00';
+        document.getElementById('kpiCumulativeDiff').className = 'text-2xl sm:text-3xl font-bold text-slate-900';
+        document.getElementById('kpiAvgDiff').textContent = '平均每期淨儲蓄 (Final): $0.00 CAD';
+        return;
+      }
+
+      const latest = data[data.length - 1];
+      document.getElementById('kpiLatestDate').textContent = `更新至 ${latest.date}`;
+      document.getElementById('kpiCadOnly').textContent = formatMoney(latest.totalCadBankOnly);
+      const hkdApproxVal = latest.totalCadBankOnly * FIXED_HKD_TO_CAD_RATE;
+      document.getElementById('kpiCadOnlyHkdApprox').textContent = `Approx. ${formatMoney(hkdApproxVal)} HKD`;
+
+      // Latest Final Net Savings
+      const diffEl = document.getElementById('kpiLatestDiff');
+      const badgeEl = document.getElementById('kpiDiffBadge');
+      if (data.length === 1 && latest.finalCad === 0) {
+        diffEl.textContent = '首期基準 ($0.00)';
+        diffEl.className = 'text-xl sm:text-2xl font-bold text-slate-500';
+        badgeEl.textContent = '起始基準';
+        badgeEl.className = 'text-xs font-semibold px-2.5 py-0.5 rounded-full bg-slate-100 text-slate-600';
+      } else {
+        diffEl.textContent = `${formatDiff(latest.finalCad)} CAD`;
+        if (latest.finalCad > 0) {
+          diffEl.className = 'text-2xl sm:text-3xl font-bold text-emerald-600';
+          badgeEl.textContent = '淨儲蓄 Saving';
+          badgeEl.className = 'text-xs font-semibold px-2.5 py-0.5 rounded-full bg-emerald-100 text-emerald-700';
+        } else if (latest.finalCad < 0) {
+          diffEl.className = 'text-2xl sm:text-3xl font-bold text-rose-600';
+          badgeEl.textContent = '淨支出 Spending';
+          badgeEl.className = 'text-xs font-semibold px-2.5 py-0.5 rounded-full bg-rose-100 text-rose-700';
+        } else {
+          diffEl.className = 'text-2xl sm:text-3xl font-bold text-slate-700';
+          badgeEl.textContent = '收支平衡';
+          badgeEl.className = 'text-xs font-semibold px-2.5 py-0.5 rounded-full bg-slate-100 text-slate-600';
+        }
+      }
+
+      // Cumulative Savings from 0 (based on Final)
+      const cumEl = document.getElementById('kpiCumulativeDiff');
+      cumEl.textContent = `${formatDiff(latest.cumulativeSavingsFromZero)} CAD`;
+      cumEl.className = `text-2xl sm:text-3xl font-bold tracking-tight ${latest.cumulativeSavingsFromZero >= 0 ? 'text-emerald-600' : 'text-rose-600'}`;
+
+      if (data.length > 1) {
+        const activePeriods = data.slice(1);
+        const avgFinal = activePeriods.reduce((acc, item) => acc + item.finalCad, 0) / activePeriods.length;
+        document.getElementById('kpiAvgDiff').textContent = `平均每期淨儲蓄 (${activePeriods.length} 期): ${formatDiff(avgFinal)} CAD`;
+      } else {
+        document.getElementById('kpiAvgDiff').textContent = '新增下一期記錄即可計算平均每期儲蓄';
+      }
+    }
+
+    function renderTable(data) {
+      const thead = document.getElementById('recordsTableHead');
+      const tbody = document.getElementById('recordsTableBody');
+      const orderedCols = getOrderedColumns();
+
+      // Build Dynamic Header
+      const dynamicAccountHeaders = orderedCols.map(col => {
+        const theme = getBankTheme(col.bankId);
+        return `
+          <th class="px-3 py-3.5 border-r border-slate-300 min-w-[125px]"
+              style="background-color: ${theme.headerBg}; color: ${theme.headerText};">
+            ${escapeHtml(col.name)} (${col.currency})
+          </th>
+        `;
+      }).join('');
+
+      thead.innerHTML = `
+        <tr class="border-b-2 border-slate-300 font-bold text-slate-900 select-none">
+          <th class="sticky-col bg-slate-100 px-3.5 py-3.5 text-left border-r border-slate-300 min-w-[125px]">Date/Bank</th>
+          ${dynamicAccountHeaders}
+          <th class="px-3 py-3.5 border-r border-slate-300 min-w-[155px]" style="background-color: #bbf7d0; color: #14532d;">Total CAD Bank only:</th>
+          <th class="bg-slate-50 px-3 py-3.5 border-r border-slate-300 min-w-[135px]">Difference (CAD)</th>
+          <th class="bg-slate-50 px-3 py-3.5 border-r border-slate-300 min-w-[105px]">Correction</th>
+          <th class="bg-indigo-100 text-indigo-950 px-3 py-3.5 border-r border-slate-300 min-w-[135px]">Final</th>
+          <th class="bg-slate-50 px-3.5 py-3.5 text-left border-r border-slate-300 min-w-[190px]">Comment</th>
+          <th class="bg-slate-100 px-3 py-3.5 text-center min-w-[95px]">操作</th>
+        </tr>
+      `;
+
+      // Build Table Body
+      if (data.length === 0) {
+        const totalCols = orderedCols.length + 7;
+        tbody.innerHTML = `
+          <tr>
+            <td colspan="${totalCols}" class="py-12 text-center text-slate-400">
+              <div class="text-base font-medium text-slate-600 mb-1">暫時未有任何銀行結餘記錄</div>
+              <p class="text-xs mb-4">撳右上角「新增結餘記錄」或「匯入 CSV」開始記錄你每月嘅存款進度！</p>
+              <button onclick="openRecordModal()" class="bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold px-4 py-2 rounded-xl">
+                + 立即新增第一筆記錄
+              </button>
+            </td>
+          </tr>
+        `;
+        return;
+      }
+
+      tbody.innerHTML = data.map(row => {
+        const accountCells = orderedCols.map(col => {
+          const theme = getBankTheme(col.bankId);
+          const val = Number(row.balances[col.id]) || 0;
+          const prefix = col.currency === 'HKD' ? 'HK$' : '$';
+          return `
+            <td class="px-3 py-2.5 border-r border-slate-200 text-slate-800"
+                style="background-color: ${theme.cellBg};">
+              ${formatMoney(val, prefix)}
+            </td>
+          `;
+        }).join('');
+
+        const diffColor = row.isFirstRow
+          ? 'text-slate-400'
+          : (row.differenceCad > 0 ? 'text-slate-700 font-medium' : (row.differenceCad < 0 ? 'text-slate-700 font-medium' : 'text-slate-500'));
+
+        const diffText = row.isFirstRow
+          ? '--'
+          : formatDiff(row.differenceCad);
+
+        const finalColor = (row.isFirstRow && row.finalCad === 0)
+          ? 'text-slate-400'
+          : (row.finalCad > 0 ? 'text-emerald-700 font-bold' : (row.finalCad < 0 ? 'text-rose-600 font-bold' : 'text-slate-700 font-semibold'));
+
+        const finalText = (row.isFirstRow && row.finalCad === 0)
+          ? '--'
+          : formatDiff(row.finalCad);
+
+        return `
+          <tr class="hover:brightness-97 transition">
+            <td class="sticky-col bg-white font-semibold text-slate-800 px-3.5 py-2.5 text-left border-r border-slate-200">${escapeHtml(row.date)}</td>
+            ${accountCells}
+            <td class="px-3 py-2.5 border-r border-slate-200 font-bold text-emerald-950" style="background-color: rgba(220, 252, 231, 0.85);">
+              ${formatMoney(row.totalCadBankOnly)}
+            </td>
+            <td class="bg-white px-3 py-2.5 border-r border-slate-200 ${diffColor}">${diffText}</td>
+            <td class="bg-white px-3 py-2.5 border-r border-slate-200 text-slate-600">${row.correction !== 0 ? formatDiff(row.correction) : '$0.00'}</td>
+            <td class="bg-indigo-50/60 px-3 py-2.5 border-r border-slate-200 ${finalColor}">${finalText}</td>
+            <td class="bg-white px-3.5 py-2.5 border-r border-slate-200 text-left text-slate-600 max-w-[250px] truncate" title="${escapeHtml(row.comment || '')}">
+              ${escapeHtml(row.comment || '')}
+            </td>
+            <td class="bg-white px-3 py-2.5 text-center">
+              <div class="inline-flex items-center gap-1">
+                <button onclick="editRecord('${escapeHtml(row.date)}')" class="p-1.5 text-slate-500 hover:text-sky-600 hover:bg-sky-50 rounded-lg transition" title="編輯">
+                  <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path></svg>
+                </button>
+                <button onclick="deleteRecord('${escapeHtml(row.date)}')" class="p-1.5 text-slate-500 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition" title="刪除">
+                  <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
+                </button>
+              </div>
+            </td>
+          </tr>
+        `;
+      }).join('');
+    }
+
+    function renderCharts(data) {
+      // =========================================================================
+      // Chart 1: Cumulative Savings Progress starting strictly at 0 based on Final
+      //          Uses linear time-proportional X-axis so gaps (e.g. Jul-Oct) stretch
+      //          proportionally and draw an interpolated average slope across missing months.
+      // =========================================================================
+      const ctxGrowth = document.getElementById('growthChart').getContext('2d');
+      if (growthChartInstance) growthChartInstance.destroy();
+
+      const parseDateMs = (ymd) => {
+        const [y, m, d] = ymd.split('-').map(Number);
+        return new Date(y, (m || 1) - 1, d || 1).getTime();
+      };
+
+      const DAY_MS = 24 * 60 * 60 * 1000;
+      const AVG_MONTH_DAYS = 30.4375;
+      let growthPoints = [];
+
+      if (data.length > 0) {
+        const firstMs = parseDateMs(data[0].date);
+        // Place "起始 (0)" 1 month prior to the first recorded date so the timeline scale stays proportional
+        const startAnchorMs = firstMs - Math.round(AVG_MONTH_DAYS * DAY_MS);
+
+        growthPoints.push({
+          x: startAnchorMs,
+          y: 0,
+          label: '起始 (0)',
+          finalVal: 0,
+          isStart: true,
+          gapInfo: null
+        });
+
+        data.forEach((d, i) => {
+          const curMs = parseDateMs(d.date);
+          let gapInfo = null;
+
+          if (i > 0) {
+            const prevMs = parseDateMs(data[i - 1].date);
+            const diffDays = Math.round((curMs - prevMs) / DAY_MS);
+            const approxMonths = diffDays / AVG_MONTH_DAYS;
+            if (approxMonths >= 1.6) {
+              const estMonths = Math.max(2, Math.round(approxMonths));
+              const avgPerMonth = d.finalCad / estMonths;
+              gapInfo = `橫跨約 ${estMonths} 個月 (${diffDays} 日)，平均每月 ${formatDiff(avgPerMonth)} CAD`;
+            }
+          }
+
+          growthPoints.push({
+            x: curMs,
+            y: Number(d.cumulativeSavingsFromZero.toFixed(2)),
+            label: d.date,
+            finalVal: Number(d.finalCad.toFixed(2)),
+            isStart: false,
+            gapInfo
+          });
+        });
+      } else {
+        growthPoints = [{ x: Date.now(), y: 0, label: '起始 (0)', finalVal: 0, isStart: true, gapInfo: null }];
+      }
+
+      const minX = growthPoints[0].x;
+      const maxX = growthPoints[growthPoints.length - 1].x;
+
+      growthChartInstance = new Chart(ctxGrowth, {
+        type: 'line',
+        data: {
+          datasets: [
+            {
+              label: '累計儲蓄進度 (CAD)',
+              data: growthPoints,
+              borderColor: '#10b981',
+              backgroundColor: 'rgba(16, 185, 129, 0.14)',
+              borderWidth: 3,
+              pointRadius: 5,
+              pointHoverRadius: 7,
+              pointBackgroundColor: '#ffffff',
+              pointBorderColor: '#10b981',
+              pointBorderWidth: 2.5,
+              fill: true,
+              tension: 0 // Straight linear interpolation across time gaps so missing months show exact average slope
+            }
+          ]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          interaction: { mode: 'nearest', axis: 'x', intersect: false },
+          plugins: {
+            legend: { display: false },
+            tooltip: {
+              backgroundColor: '#0f172a',
+              padding: 11,
+              cornerRadius: 10,
+              callbacks: {
+                title: (items) => {
+                  if (!items.length) return '';
+                  return items[0].raw.label;
+                },
+                label: (ctx) => {
+                  const pt = ctx.raw;
+                  if (pt.isStart) return '起點基準: $0.00 CAD';
+                  const lines = [
+                    `累計儲蓄: ${formatDiff(pt.y)} CAD`,
+                    `當期 Final: ${formatDiff(pt.finalVal)} CAD`
+                  ];
+                  if (pt.gapInfo) {
+                    lines.push(`📊 ${pt.gapInfo}`);
+                  }
+                  return lines;
+                }
+              }
+            }
+          },
+          scales: {
+            y: {
+              beginAtZero: true,
+              ticks: {
+                callback: (val) => (val >= 0 ? '$' : '-$') + Math.abs(val).toLocaleString(),
+                font: { size: 11 },
+                color: '#64748b'
+              },
+              grid: { color: '#f1f5f9' },
+              border: { display: false }
+            },
+            x: {
+              type: 'linear',
+              min: minX,
+              max: maxX,
+              afterBuildTicks: (axis) => {
+                // Place ticks at every monthly interval across the timeline so skipped months (e.g. 2026-07..10) are clearly visible
+                const startDate = new Date(minX);
+                const endDate = new Date(maxX);
+                const monthTicks = [];
+                let cursor = new Date(startDate.getFullYear(), startDate.getMonth(), 1);
+                while (cursor.getTime() <= endDate.getTime() + 15 * DAY_MS) {
+                  const t = cursor.getTime();
+                  if (t >= minX && t <= maxX) {
+                    monthTicks.push({ value: t });
+                  }
+                  cursor = new Date(cursor.getFullYear(), cursor.getMonth() + 1, 1);
+                }
+                if (monthTicks.length >= 2) {
+                  axis.ticks = monthTicks;
+                }
+              },
+              ticks: {
+                maxRotation: 45,
+                minRotation: 0,
+                autoSkip: true,
+                maxTicksLimit: 12,
+                callback: (val) => {
+                  const dt = new Date(val);
+                  const y = dt.getFullYear();
+                  const m = String(dt.getMonth() + 1).padStart(2, '0');
+                  return `${y}-${m}`;
+                },
+                font: { size: 11 },
+                color: '#64748b'
+              },
+              grid: { color: '#f8fafc' },
+              border: { display: false }
+            }
+          }
+        }
+      });
+
+      // =========================================================================
+      // Chart 2: Period Final Bar Chart (每期淨儲蓄 / 支出 based on Final)
+      // =========================================================================
+      const ctxDiff = document.getElementById('diffChart').getContext('2d');
+      if (diffChartInstance) diffChartInstance.destroy();
+
+      const finalLabels = data.map(d => d.date);
+      const finalSeries = data.map((d, i) => (i === 0 && d.finalCad === 0) ? 0 : Number(d.finalCad.toFixed(2)));
+
+      diffChartInstance = new Chart(ctxDiff, {
+        type: 'bar',
+        data: {
+          labels: finalLabels,
+          datasets: [
+            {
+              label: 'Final (CAD)',
+              data: finalSeries,
+              backgroundColor: finalSeries.map(v => v >= 0 ? 'rgba(16, 185, 129, 0.88)' : 'rgba(244, 63, 94, 0.88)'),
+              borderRadius: 8,
+              maxBarThickness: 36
+            }
+          ]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: { display: false },
+            tooltip: {
+              backgroundColor: '#0f172a',
+              padding: 10,
+              cornerRadius: 10,
+              callbacks: {
+                label: (ctx) => {
+                  const val = ctx.parsed.y;
+                  const prefix = val > 0 ? 'Final 淨儲蓄: +$' : (val < 0 ? 'Final 淨支出: -$' : 'Final: $');
+                  return `${prefix}${Math.abs(val).toLocaleString()} CAD`;
+                }
+              }
+            }
+          },
+          scales: {
+            y: {
+              ticks: {
+                callback: (val) => (val >= 0 ? '+$' : '-$') + Math.abs(val).toLocaleString(),
+                font: { size: 11 },
+                color: '#64748b'
+              },
+              grid: { color: '#f1f5f9' },
+              border: { display: false }
+            },
+            x: {
+              ticks: { font: { size: 11 }, color: '#64748b' },
+              grid: { display: false },
+              border: { display: false }
+            }
+          }
+        }
+      });
+
+      // =========================================================================
+      // Chart 3: Latest Bank Distribution Doughnut Chart (Grouped by Bank: RBC, BMO, HSBC, +Custom Banks)
+      // =========================================================================
+      const ctxDist = document.getElementById('distributionChart').getContext('2d');
+      if (distChartInstance) distChartInstance.destroy();
+
+      if (data.length > 0) {
+        const latest = data[data.length - 1];
+        const bankLabels = [];
+        const bankCadEquivValues = [];
+        const bankColors = [];
+        const bankTooltipDetails = [];
+
+        banks.forEach(bank => {
+          const cols = accountColumns.filter(c => c.bankId === bank.id);
+          let cadSum = 0;
+          let hkdOriginalSum = 0;
+
+          cols.forEach(col => {
+            const rawVal = Number(latest.balances[col.id]) || 0;
+            if (col.currency === 'HKD') {
+              hkdOriginalSum += rawVal;
+              cadSum += rawVal / FIXED_HKD_TO_CAD_RATE;
+            } else {
+              cadSum += rawVal;
+            }
+          });
+
+          const theme = getBankTheme(bank.id);
+          bankLabels.push(bank.name);
+          bankCadEquivValues.push(Number(cadSum.toFixed(2)));
+          bankColors.push(theme.chartColor);
+
+          if (hkdOriginalSum > 0 && cadSum === hkdOriginalSum / FIXED_HKD_TO_CAD_RATE) {
+            bankTooltipDetails.push(`HK$${hkdOriginalSum.toLocaleString()} (折算 $${cadSum.toLocaleString('en-CA', { maximumFractionDigits: 2 })} CAD)`);
+          } else if (hkdOriginalSum > 0) {
+            bankTooltipDetails.push(`折算總計 $${cadSum.toLocaleString('en-CA', { maximumFractionDigits: 2 })} CAD (含 HK$${hkdOriginalSum.toLocaleString()})`);
+          } else {
+            bankTooltipDetails.push(`$${cadSum.toLocaleString('en-CA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} CAD`);
+          }
+        });
+
+        distChartInstance = new Chart(ctxDist, {
+          type: 'doughnut',
+          data: {
+            labels: bankLabels,
+            datasets: [{
+              data: bankCadEquivValues,
+              backgroundColor: bankColors,
+              borderWidth: 2.5,
+              borderColor: '#ffffff'
+            }]
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            cutout: '62%',
+            plugins: {
+              legend: {
+                position: 'bottom',
+                labels: { boxWidth: 12, padding: 12, font: { size: 11.5, weight: '600' }, color: '#334155' }
+              },
+              tooltip: {
+                backgroundColor: '#0f172a',
+                padding: 10,
+                cornerRadius: 10,
+                callbacks: {
+                  label: (ctx) => {
+                    const idx = ctx.dataIndex;
+                    const total = ctx.dataset.data.reduce((a, b) => a + b, 0);
+                    const pct = total > 0 ? ((ctx.parsed / total) * 100).toFixed(1) : 0;
+                    return `${ctx.label}: ${bankTooltipDetails[idx]} (${pct}%)`;
+                  }
+                }
+              }
+            }
+          }
+        });
+      }
+    }
+
+    // ==========================================
+    // 5. Record Modal (Add / Edit with YYYY-MM-DD)
+    // ==========================================
+    function buildDynamicAccountInputs(existingBalances = {}) {
+      const container = document.getElementById('dynamicAccountInputsContainer');
+
+      container.innerHTML = banks.map(bank => {
+        const cols = accountColumns.filter(c => c.bankId === bank.id);
+        if (cols.length === 0) return '';
+        const theme = getBankTheme(bank.id);
+
+        const inputsHtml = cols.map(col => {
+          const val = existingBalances[col.id] !== undefined ? existingBalances[col.id] : '';
+          return `
+            <div>
+              <label class="block text-xs font-semibold text-slate-700 mb-1">${escapeHtml(col.name)} (${col.currency})</label>
+              <input type="number" step="0.01" data-col-id="${escapeHtml(col.id)}" data-currency="${col.currency}" oninput="updateLiveFinalPreview()" value="${val}" placeholder="0.00"
+                     class="dynamic-balance-input w-full px-3 py-2 bg-white rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-emerald-500/30 focus:border-emerald-500 text-sm text-right font-medium" />
+            </div>
+          `;
+        }).join('');
+
+        return `
+          <div class="rounded-2xl p-4 space-y-3 border border-black/10 shadow-2xs" style="background-color: ${theme.cellBg};">
+            <div class="text-xs font-bold uppercase tracking-wider flex items-center gap-1.5 px-2.5 py-1 rounded-lg w-fit"
+                 style="background-color: ${theme.headerBg}; color: ${theme.headerText};">
+              <span>🏦 ${escapeHtml(bank.name)}</span>
+            </div>
+            <div class="space-y-2.5">
+              ${inputsHtml}
+            </div>
+          </div>
+        `;
+      }).join('');
+    }
+
+    function updateLiveFinalPreview() {
+      const previewEl = document.getElementById('liveFinalPreview');
+      if (!previewEl) return;
+
+      const originalDate = document.getElementById('editRecordOriginalDate').value;
+      const dateVal = document.getElementById('inputDate').value.trim();
+      const correctionVal = parseFloat(document.getElementById('inputCorrection').value) || 0;
+
+      // Sum current modal CAD inputs
+      let currentCadTotal = 0;
+      document.querySelectorAll('.dynamic-balance-input').forEach(input => {
+        if (input.getAttribute('data-currency') === 'CAD') {
+          currentCadTotal += parseFloat(input.value) || 0;
+        }
+      });
+
+      // Find previous record chronologically before dateVal
+      const otherRecords = records
+        .filter(r => r.date !== originalDate && r.date < dateVal)
+        .sort((a, b) => a.date.localeCompare(b.date));
+
+      let diffCad = 0;
+      if (otherRecords.length > 0) {
+        const prevRec = otherRecords[otherRecords.length - 1];
+        const prevBalances = prevRec.balances || {};
+        let prevCadTotal = 0;
+        accountColumns.forEach(col => {
+          if (col.currency === 'CAD') {
+            prevCadTotal += Number(prevBalances[col.id]) || 0;
+          }
+        });
+        diffCad = currentCadTotal - prevCadTotal;
+      }
+
+      const finalVal = diffCad + correctionVal;
+      previewEl.textContent = `${formatDiff(finalVal)} CAD`;
+      previewEl.className = `w-full px-3 py-2 rounded-xl border text-sm text-right font-bold ${
+        finalVal > 0
+          ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+          : (finalVal < 0 ? 'border-rose-200 bg-rose-50 text-rose-700' : 'border-indigo-200 bg-indigo-50/70 text-indigo-900')
+      }`;
+    }
+
+    function openRecordModal(editDate = null) {
+      const modal = document.getElementById('recordModal');
+      document.getElementById('recordForm').reset();
+
+      if (editDate) {
+        const rec = records.find(r => r.date === editDate);
+        if (rec) {
+          document.getElementById('recordModalTitle').textContent = `編輯結餘記錄 (${rec.date})`;
+          document.getElementById('editRecordOriginalDate').value = rec.date;
+          document.getElementById('inputDate').value = rec.date;
+          document.getElementById('inputCorrection').value = rec.correction !== 0 ? rec.correction : '';
+          document.getElementById('inputComment').value = rec.comment || '';
+          buildDynamicAccountInputs(rec.balances || {});
+        }
+      } else {
+        document.getElementById('recordModalTitle').textContent = '新增銀行結餘記錄';
+        document.getElementById('editRecordOriginalDate').value = '';
+        buildDynamicAccountInputs({});
+
+        // Suggest next month's end date or today's YYYY-MM-DD
+        const sorted = [...records].sort((a, b) => a.date.localeCompare(b.date));
+        if (sorted.length > 0) {
+          document.getElementById('inputDate').value = suggestNextDate(sorted[sorted.length - 1].date);
+        } else {
+          document.getElementById('inputDate').value = new Date().toISOString().slice(0, 10);
+        }
+      }
+
+      updateLiveFinalPreview();
+      modal.classList.remove('hidden');
+      modal.classList.add('flex');
+    }
+
+    function closeRecordModal() {
+      const modal = document.getElementById('recordModal');
+      modal.classList.add('hidden');
+      modal.classList.remove('flex');
+    }
+
+    function prefillFromLatest() {
+      if (records.length === 0) {
+        showToast('暫時未有上一期記錄可以複製');
+        return;
+      }
+      const sorted = [...records].sort((a, b) => a.date.localeCompare(b.date));
+      const latest = sorted[sorted.length - 1];
+      const latestBalances = latest.balances || {};
+
+      document.querySelectorAll('.dynamic-balance-input').forEach(input => {
+        const colId = input.getAttribute('data-col-id');
+        input.value = latestBalances[colId] !== undefined ? latestBalances[colId] : 0;
+      });
+      updateLiveFinalPreview();
+      showToast(`已複製 ${latest.date} 嘅結餘數字！`);
+    }
+
+    function saveRecord(e) {
+      e.preventDefault();
+      const originalDate = document.getElementById('editRecordOriginalDate').value;
+      const dateVal = document.getElementById('inputDate').value.trim();
+      if (!dateVal) return;
+
+      const balances = {};
+      document.querySelectorAll('.dynamic-balance-input').forEach(input => {
+        const colId = input.getAttribute('data-col-id');
+        balances[colId] = parseFloat(input.value) || 0;
+      });
+
+      const newRec = {
+        date: dateVal,
+        balances,
+        correction: parseFloat(document.getElementById('inputCorrection').value) || 0,
+        comment: document.getElementById('inputComment').value.trim()
+      };
+
+      if (originalDate) {
+        // Remove old date entry if date was changed, then insert/update
+        records = records.filter(r => r.date !== originalDate && r.date !== dateVal);
+        records.push(newRec);
+        showToast(`已更新 ${dateVal} 記錄！`);
+      } else {
+        const existingIdx = records.findIndex(r => r.date === dateVal);
+        if (existingIdx !== -1) {
+          records[existingIdx] = newRec;
+          showToast(`已覆蓋更新 ${dateVal} 記錄！`);
+        } else {
+          records.push(newRec);
+          showToast(`已新增 ${dateVal} 記錄！`);
+        }
+      }
+
+      meta.isSample = false;
+      saveAllState();
+      closeRecordModal();
+      renderAll();
+    }
+
+    function editRecord(dateStr) {
+      openRecordModal(dateStr);
+    }
+
+    function deleteRecord(dateStr) {
+      showConfirmDialog(
+        '刪除記錄',
+        `確定要刪除「${dateStr}」呢筆銀行結餘記錄嗎？`,
+        () => {
+          records = records.filter(r => r.date !== dateStr);
+          saveAllState();
+          renderAll();
+          showToast(`已刪除 ${dateStr}`);
+        }
+      );
+    }
+
+    // ==========================================
+    // 6. Dynamic Add Bank / Account Column Modal
+    // ==========================================
+    function openColumnModal() {
+      const modal = document.getElementById('columnModal');
+      document.getElementById('newBankNameInput').value = '';
+      document.getElementById('newAccountNameInput').value = '';
+      document.getElementById('newAccountCurrencySelect').value = 'CAD';
+
+      // Default to new_bank mode
+      document.querySelector('input[name="colAddMode"][value="new_bank"]').checked = true;
+      toggleColAddMode();
+
+      // Update auto color preview for next new bank
+      const nextColorIdx = banks.length % BANK_COLOR_PALETTE.length;
+      const nextTheme = BANK_COLOR_PALETTE[nextColorIdx];
+      const previewEl = document.getElementById('newBankColorPreview');
+      previewEl.style.backgroundColor = nextTheme.headerBg;
+      previewEl.style.color = nextTheme.headerText;
+      previewEl.textContent = '新銀行專屬顏色';
+
+      // Populate existing banks dropdown
+      const selectEl = document.getElementById('existingBankSelect');
+      selectEl.innerHTML = banks.map(b => `<option value="${escapeHtml(b.id)}">${escapeHtml(b.name)}</option>`).join('');
+      updateExistingBankPreview();
+
+      // Render custom columns list for deletion if any
+      renderCustomColumnsManageList();
+
+      modal.classList.remove('hidden');
+      modal.classList.add('flex');
+    }
+
+    function closeColumnModal() {
+      const modal = document.getElementById('columnModal');
+      modal.classList.add('hidden');
+      modal.classList.remove('flex');
+    }
+
+    function toggleColAddMode() {
+      const mode = document.querySelector('input[name="colAddMode"]:checked').value;
+      const newBankDiv = document.getElementById('newBankFields');
+      const existingBankDiv = document.getElementById('existingBankFields');
+
+      if (mode === 'new_bank') {
+        newBankDiv.classList.remove('hidden');
+        existingBankDiv.classList.add('hidden');
+        document.getElementById('newBankNameInput').required = true;
+      } else {
+        newBankDiv.classList.add('hidden');
+        existingBankDiv.classList.remove('hidden');
+        document.getElementById('newBankNameInput').required = false;
+        updateExistingBankPreview();
+      }
+    }
+
+    function updateExistingBankPreview() {
+      const bankId = document.getElementById('existingBankSelect').value;
+      if (!bankId) return;
+      const bank = getBankById(bankId);
+      const theme = getBankTheme(bankId);
+      const previewEl = document.getElementById('existingBankColorPreview');
+      previewEl.style.backgroundColor = theme.headerBg;
+      previewEl.style.color = theme.headerText;
+      previewEl.textContent = `${bank.name} 專屬色`;
+    }
+
+    function handleAddColumn(e) {
+      e.preventDefault();
+      const mode = document.querySelector('input[name="colAddMode"]:checked').value;
+      const accName = document.getElementById('newAccountNameInput').value.trim();
+      const currency = document.getElementById('newAccountCurrencySelect').value;
+
+      if (!accName) return;
+
+      let targetBankId = '';
+
+      if (mode === 'new_bank') {
+        const bankName = document.getElementById('newBankNameInput').value.trim();
+        if (!bankName) {
+          showToast('請輸入新銀行名稱！');
+          return;
+        }
+        // Check if bank already exists (case-insensitive)
+        const existingBank = banks.find(b => b.name.toLowerCase() === bankName.toLowerCase());
+        if (existingBank) {
+          targetBankId = existingBank.id;
+        } else {
+          targetBankId = 'BANK_' + Date.now();
+          const colorIndex = banks.length % BANK_COLOR_PALETTE.length;
+          banks.push({
+            id: targetBankId,
+            name: bankName,
+            colorIndex
+          });
+        }
+      } else {
+        targetBankId = document.getElementById('existingBankSelect').value;
+      }
+
+      const newColId = 'col_' + Date.now();
+      accountColumns.push({
+        id: newColId,
+        bankId: targetBankId,
+        name: accName,
+        currency: currency,
+        isDefault: false
+      });
+
+      // Initialize balance to 0 for existing records
+      records.forEach(r => {
+        if (!r.balances) r.balances = {};
+        r.balances[newColId] = 0;
+      });
+
+      saveAllState();
+      closeColumnModal();
+      renderAll();
+      const bankObj = getBankById(targetBankId);
+      showToast(`已成功新增「${bankObj.name} - ${accName} (${currency})」欄位！`);
+    }
+
+    function renderCustomColumnsManageList() {
+      const customCols = accountColumns.filter(c => !c.isDefault);
+      const section = document.getElementById('customColumnsManageSection');
+      const listEl = document.getElementById('customColumnsList');
+
+      if (customCols.length === 0) {
+        section.classList.add('hidden');
+        return;
+      }
+
+      section.classList.remove('hidden');
+      listEl.innerHTML = customCols.map(col => {
+        const bank = getBankById(col.bankId);
+        const theme = getBankTheme(col.bankId);
+        return `
+          <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold border border-black/10"
+                style="background-color: ${theme.headerBg}; color: ${theme.headerText};">
+            ${escapeHtml(bank.name)}: ${escapeHtml(col.name)} (${col.currency})
+            <button type="button" onclick="removeCustomColumn('${escapeHtml(col.id)}')" class="ml-1 hover:opacity-70 font-bold" title="刪除此欄位">&times;</button>
+          </span>
+        `;
+      }).join('');
+    }
+
+    function removeCustomColumn(colId) {
+      const col = accountColumns.find(c => c.id === colId);
+      if (!col) return;
+
+      accountColumns = accountColumns.filter(c => c.id !== colId);
+
+      // Clean up bank if it has no remaining columns and is not one of the 3 core default banks
+      const remainingForBank = accountColumns.filter(c => c.bankId === col.bankId);
+      if (remainingForBank.length === 0 && !['RBC', 'BMO', 'HSBC'].includes(col.bankId)) {
+        banks = banks.filter(b => b.id !== col.bankId);
+      }
+
+      // Clean up balances
+      records.forEach(r => {
+        if (r.balances && colId in r.balances) {
+          delete r.balances[colId];
+        }
+      });
+
+      saveAllState();
+      renderCustomColumnsManageList();
+      renderAll();
+      showToast(`已移除「${col.name}」欄位`);
+    }
+
+    // ==========================================
+    // 7. Reset & CSV Export
+    // ==========================================
+    function clearRecordsOnly() {
+      records = [];
+      meta.isSample = false;
+      saveAllState();
+      renderAll();
+      showToast('已清空示範數據，你可以開始輸入自己嘅記錄！');
+    }
+
+    function confirmFullReset() {
+      showConfirmDialog(
+        '重設全部資料',
+        '確定要清空所有記錄並恢復預設銀行欄位嗎？',
+        () => {
+          banks = JSON.parse(JSON.stringify(DEFAULT_BANKS));
+          accountColumns = JSON.parse(JSON.stringify(DEFAULT_COLUMNS));
+          records = [];
+          meta.isSample = false;
+          saveAllState();
+          renderAll();
+          showToast('已重設並清空全部記錄！');
+        }
+      );
+    }
+
+    function exportCSV() {
+      const computed = computeMetrics();
+      const orderedCols = getOrderedColumns();
+
+      const headers = [
+        'Date/Bank',
+        ...orderedCols.map(c => `${c.name} (${c.currency})`),
+        'Total CAD Bank only',
+        'Difference (CAD)',
+        'Correction',
+        'Final',
+        'Comment'
+      ];
+
+      const rows = computed.map(r => [
+        r.date,
+        ...orderedCols.map(c => (Number(r.balances[c.id]) || 0).toFixed(2)),
+        r.totalCadBankOnly.toFixed(2),
+        r.differenceCad.toFixed(2),
+        r.correction.toFixed(2),
+        r.finalCad.toFixed(2),
+        `"${(r.comment || '').replace(/"/g, '""')}"`
+      ]);
+
+      const csvContent = '\uFEFF' + [headers.join(','), ...rows.map(e => e.join(','))].join('\n');
+      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.setAttribute('href', url);
+      link.setAttribute('download', `Bank_Savings_Record_${new Date().toISOString().slice(0, 10)}.csv`);
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+      showToast('已成功匯出 CSV 檔案！');
+    }
+
+    // ==========================================
+    // 7B. Real Excel (.xlsx) Workbook Builder & Parser + Google Drive API
+    // ==========================================
+    function buildExcelWorkbookArrayBuffer() {
+      const computed = computeMetrics();
+      const orderedCols = getOrderedColumns();
+
+      // Sheet 1: Human-readable Record table matching user's exact layout
+      const headers = [
+        'Date/Bank',
+        ...orderedCols.map(c => `${c.name} (${c.currency})`),
+        'Total CAD Bank only',
+        'Difference (CAD)',
+        'Correction',
+        'Final',
+        'Comment'
+      ];
+
+      const aoaData = [headers];
+      computed.forEach(r => {
+        aoaData.push([
+          r.date,
+          ...orderedCols.map(c => Number((Number(r.balances[c.id]) || 0).toFixed(2))),
+          Number(r.totalCadBankOnly.toFixed(2)),
+          Number(r.differenceCad.toFixed(2)),
+          Number(r.correction.toFixed(2)),
+          Number(r.finalCad.toFixed(2)),
+          r.comment || ''
+        ]);
+      });
+
+      const wb = XLSX.utils.book_new();
+      const wsRecord = XLSX.utils.aoa_to_sheet(aoaData);
+      wsRecord['!cols'] = headers.map((h, idx) => ({
+        wch: idx === 0 ? 14 : (idx === headers.length - 1 ? 28 : Math.max(16, h.length + 3))
+      }));
+      XLSX.utils.book_append_sheet(wb, wsRecord, 'Record');
+
+      // Sheet 2: _Schema metadata so custom banks, colors, and columns restore 100% faithfully
+      const schemaRows = [
+        ['key', 'json_value'],
+        ['banks', JSON.stringify(banks)],
+        ['accountColumns', JSON.stringify(accountColumns)],
+        ['meta', JSON.stringify(meta)]
+      ];
+      const wsSchema = XLSX.utils.aoa_to_sheet(schemaRows);
+      XLSX.utils.book_append_sheet(wb, wsSchema, '_Schema');
+
+      return XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
+    }
+
+    function applyParsedExcelWorkbook(arrayBuffer) {
+      const wb = XLSX.read(arrayBuffer, { type: 'array' });
+
+      // 1. Restore custom banks & columns if _Schema sheet exists
+      if (wb.Sheets['_Schema']) {
+        const schemaRows = XLSX.utils.sheet_to_json(wb.Sheets['_Schema'], { header: 1 });
+        schemaRows.forEach(row => {
+          if (!row || row.length < 2) return;
+          try {
+            if (row[0] === 'banks') banks = JSON.parse(row[1]);
+            if (row[0] === 'accountColumns') accountColumns = JSON.parse(row[1]);
+            if (row[0] === 'meta') meta = JSON.parse(row[1]);
+          } catch (e) {}
+        });
+      }
+
+      // 2. Parse Record sheet
+      const targetSheetName = wb.Sheets['Record'] ? 'Record' : wb.SheetNames[0];
+      const sheet = wb.Sheets[targetSheetName];
+      const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
+      if (!rows || rows.length < 2) {
+        throw new Error('Excel 檔案內未找到有效記錄列');
+      }
+
+      const headers = rows[0].map(h => String(h || '').trim());
+      const dateIdx = headers.findIndex(h => h.toLowerCase().includes('date'));
+      const correctionIdx = headers.findIndex(h => h.toLowerCase() === 'correction');
+      const commentIdx = headers.findIndex(h => h.toLowerCase() === 'comment');
+
+      if (dateIdx === -1) {
+        throw new Error('Excel 缺少 Date/Bank 欄位');
+      }
+
+      const skipHeaders = [
+        'date/bank', 'date', 'total cad bank only', 'total cad bank only:',
+        'total (cad)', 'total (hkd)', 'difference (cad)', 'correction', 'final', 'comment'
+      ];
+
+      const colIndexMap = [];
+      headers.forEach((rawHeader, idx) => {
+        const lower = rawHeader.toLowerCase().replace(/:$/, '').trim();
+        if (!lower || skipHeaders.includes(lower)) return;
+
+        const match = rawHeader.match(/^(.+?)\s*\((CAD|HKD)\)$/i);
+        const accName = match ? match[1].trim() : rawHeader.trim();
+        const currency = match ? match[2].toUpperCase() : (lower.includes('hkd') || lower.includes('hsbc') ? 'HKD' : 'CAD');
+
+        let existingCol = accountColumns.find(
+          c => c.name.toLowerCase() === accName.toLowerCase() && c.currency === currency
+        );
+
+        if (!existingCol) {
+          const guessedBankName = accName.split(/\s+/)[0].toUpperCase() === 'HK'
+            ? 'HSBC'
+            : accName.split(/\s+/)[0];
+          let targetBank = banks.find(b => b.name.toLowerCase() === guessedBankName.toLowerCase());
+          if (!targetBank) {
+            targetBank = {
+              id: 'BANK_' + Date.now() + '_' + idx,
+              name: guessedBankName,
+              colorIndex: banks.length % BANK_COLOR_PALETTE.length
+            };
+            banks.push(targetBank);
+          }
+          existingCol = {
+            id: 'col_' + Date.now() + '_' + idx,
+            bankId: targetBank.id,
+            name: accName,
+            currency,
+            isDefault: false
+          };
+          accountColumns.push(existingCol);
+        }
+
+        colIndexMap.push({ colIdx: idx, colId: existingCol.id });
+      });
+
+      const parsedRecords = [];
+      for (let i = 1; i < rows.length; i++) {
+        const cells = rows[i];
+        let rawDate = cells[dateIdx];
+        if (rawDate === undefined || rawDate === null || String(rawDate).trim() === '') continue;
+
+        // Handle Excel serial date numbers if present
+        if (typeof rawDate === 'number') {
+          const dt = XLSX.SSF.parse_date_code(rawDate);
+          if (dt) {
+            rawDate = `${dt.y}-${String(dt.m).padStart(2, '0')}-${String(dt.d).padStart(2, '0')}`;
+          }
+        }
+
+        const normalizedDate = normalizeImportDate(String(rawDate));
+        const balances = {};
+        accountColumns.forEach(c => { balances[c.id] = 0; });
+
+        colIndexMap.forEach(({ colIdx, colId }) => {
+          const val = cells[colIdx];
+          const num = typeof val === 'number' ? val : parseFloat(String(val || '0').replace(/[$,HK\s]/gi, ''));
+          balances[colId] = isNaN(num) ? 0 : num;
+        });
+
+        const rawCorr = correctionIdx !== -1 ? cells[correctionIdx] : 0;
+        const correction = typeof rawCorr === 'number'
+          ? rawCorr
+          : (parseFloat(String(rawCorr || '0').replace(/[$,\s]/g, '')) || 0);
+        const comment = commentIdx !== -1 ? String(cells[commentIdx] || '').trim() : '';
+
+        parsedRecords.push({
+          date: normalizedDate,
+          balances,
+          correction,
+          comment
+        });
+      }
+
+      records = parsedRecords;
+      meta.isSample = false;
+      saveToLocalCache();
+      renderAll();
+      return parsedRecords.length;
+    }
+
+    function exportExcelFile() {
+      try {
+        const arrayBuf = buildExcelWorkbookArrayBuffer();
+        const blob = new Blob([arrayBuf], {
+          type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+        });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `Bank_Savings_Tracker_${new Date().toISOString().slice(0, 10)}.xlsx`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        showToast('已成功匯出 Excel (.xlsx) 檔案！');
+      } catch (e) {
+        console.error(e);
+        showToast('匯出 Excel 失敗');
+      }
+    }
+
+    function importFileHandler(event) {
+      const file = event.target.files[0];
+      if (!file) return;
+      const lowerName = file.name.toLowerCase();
+
+      if (lowerName.endsWith('.xlsx') || lowerName.endsWith('.xls')) {
+        const reader = new FileReader();
+        reader.onload = function(e) {
+          try {
+            const count = applyParsedExcelWorkbook(e.target.result);
+            saveAllState();
+            showToast(`成功由 Excel 匯入 ${count} 筆記錄！`);
+          } catch (err) {
+            console.error(err);
+            showToast('讀取 Excel 檔案失敗：' + err.message);
+          } finally {
+            event.target.value = '';
+          }
+        };
+        reader.readAsArrayBuffer(file);
+      } else {
+        importCSV(event);
+      }
+    }
+
+    function parseCSVLine(line) {
+      const result = [];
+      let current = '';
+      let inQuotes = false;
+      for (let i = 0; i < line.length; i++) {
+        const ch = line[i];
+        if (ch === '"') {
+          if (inQuotes && line[i + 1] === '"') {
+            current += '"';
+            i++;
+          } else {
+            inQuotes = !inQuotes;
+          }
+        } else if (ch === ',' && !inQuotes) {
+          result.push(current.trim());
+          current = '';
+        } else {
+          current += ch;
+        }
+      }
+      result.push(current.trim());
+      return result;
+    }
+
+    function normalizeImportDate(rawDate) {
+      const cleaned = rawDate.trim().replace(/\//g, '-');
+      // Already YYYY-MM-DD
+      if (/^\d{4}-\d{2}-\d{2}$/.test(cleaned)) return cleaned;
+      // YYYY-M-D -> pad month/day
+      const ymdMatch = cleaned.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+      if (ymdMatch) {
+        return `${ymdMatch[1]}-${ymdMatch[2].padStart(2, '0')}-${ymdMatch[3].padStart(2, '0')}`;
+      }
+      // YYYY-MM -> default to last day of month
+      const ymMatch = cleaned.match(/^(\d{4})-(\d{1,2})$/);
+      if (ymMatch) {
+        const y = parseInt(ymMatch[1], 10);
+        const m = parseInt(ymMatch[2], 10);
+        const lastDay = new Date(y, m, 0).getDate();
+        return `${y}-${String(m).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`;
+      }
+      return cleaned;
+    }
+
+    function importCSV(event) {
+      const file = event.target.files[0];
+      if (!file) return;
+
+      const reader = new FileReader();
+      reader.onload = function(e) {
+        try {
+          const text = e.target.result.replace(/^\uFEFF/, '');
+          const lines = text.split(/\r?\n/).filter(l => l.trim().length > 0);
+          if (lines.length < 2) {
+            showToast('CSV 檔案內容為空或格式不正確');
+            return;
+          }
+
+          const headers = parseCSVLine(lines[0]);
+          const dateIdx = headers.findIndex(h => h.toLowerCase().includes('date'));
+          const correctionIdx = headers.findIndex(h => h.toLowerCase() === 'correction');
+          const commentIdx = headers.findIndex(h => h.toLowerCase() === 'comment');
+
+          if (dateIdx === -1) {
+            showToast('CSV 缺少 Date/Bank 日期欄位，無法匯入');
+            return;
+          }
+
+          // Map account columns (skip computed/meta columns)
+          const skipHeaders = [
+            'date/bank',
+            'date',
+            'total cad bank only',
+            'total cad bank only:',
+            'total (cad)',
+            'total (hkd)',
+            'difference (cad)',
+            'correction',
+            'final',
+            'comment'
+          ];
+
+          const colIndexMap = []; // { csvIdx, colId }
+          headers.forEach((rawHeader, idx) => {
+            const lower = rawHeader.toLowerCase().replace(/:$/, '').trim();
+            if (skipHeaders.includes(lower)) return;
+
+            // Parse header like "RBC (CAD)" or "HK HSBC (HKD)"
+            const match = rawHeader.match(/^(.+?)\s*\((CAD|HKD)\)$/i);
+            const accName = match ? match[1].trim() : rawHeader.trim();
+            const currency = match ? match[2].toUpperCase() : (lower.includes('hkd') || lower.includes('hsbc') ? 'HKD' : 'CAD');
+
+            // Find matching existing column by name & currency
+            let existingCol = accountColumns.find(
+              c => c.name.toLowerCase() === accName.toLowerCase() && c.currency === currency
+            );
+
+            if (!existingCol) {
+              // Auto-detect bank prefix (first word) or create new bank
+              const guessedBankName = accName.split(/\s+/)[0].toUpperCase() === 'HK'
+                ? 'HSBC'
+                : accName.split(/\s+/)[0];
+
+              let targetBank = banks.find(b => b.name.toLowerCase() === guessedBankName.toLowerCase());
+              if (!targetBank) {
+                targetBank = {
+                  id: 'BANK_' + Date.now() + '_' + idx,
+                  name: guessedBankName,
+                  colorIndex: banks.length % BANK_COLOR_PALETTE.length
+                };
+                banks.push(targetBank);
+              }
+
+              existingCol = {
+                id: 'col_' + Date.now() + '_' + idx,
+                bankId: targetBank.id,
+                name: accName,
+                currency: currency,
+                isDefault: false
+              };
+              accountColumns.push(existingCol);
+            }
+
+            colIndexMap.push({ csvIdx: idx, colId: existingCol.id });
+          });
+
+          const importedRecords = [];
+          for (let i = 1; i < lines.length; i++) {
+            const cells = parseCSVLine(lines[i]);
+            const rawDate = cells[dateIdx];
+            if (!rawDate) continue;
+
+            const normalizedDate = normalizeImportDate(rawDate);
+            const balances = {};
+            accountColumns.forEach(c => { balances[c.id] = 0; });
+
+            colIndexMap.forEach(({ csvIdx, colId }) => {
+              const rawNum = (cells[csvIdx] || '0').replace(/[$,HK\s]/gi, '');
+              balances[colId] = parseFloat(rawNum) || 0;
+            });
+
+            const rawCorrection = correctionIdx !== -1 ? (cells[correctionIdx] || '0').replace(/[$,\s]/g, '') : '0';
+            const correction = parseFloat(rawCorrection) || 0;
+            const comment = commentIdx !== -1 ? (cells[commentIdx] || '') : '';
+
+            importedRecords.push({
+              date: normalizedDate,
+              balances,
+              correction,
+              comment
+            });
+          }
+
+          if (importedRecords.length === 0) {
+            showToast('未能喺 CSV 讀取到有效記錄');
+            return;
+          }
+
+          // Merge imported records by date (update existing date or append new)
+          importedRecords.forEach(imp => {
+            const idx = records.findIndex(r => r.date === imp.date);
+            if (idx !== -1) {
+              records[idx] = imp;
+            } else {
+              records.push(imp);
+            }
+          });
+
+          meta.isSample = false;
+          saveAllState();
+          renderAll();
+          showToast(`成功匯入 ${importedRecords.length} 筆 CSV 記錄！`);
+        } catch (err) {
+          console.error('CSV Import Error:', err);
+          showToast('匯入 CSV 失敗，請確認檔案格式為 UTF-8 CSV');
+        } finally {
+          event.target.value = '';
+        }
+      };
+      reader.readAsText(file);
+    }
+
+    // ==========================================
+    // 8. Utility Helpers
+    // ==========================================
+    function suggestNextDate(ymd) {
+      const parts = ymd.split('-');
+      if (parts.length !== 3) return new Date().toISOString().slice(0, 10);
+      let year = parseInt(parts[0], 10);
+      let month = parseInt(parts[1], 10) + 1;
+      if (month > 12) {
+        month = 1;
+        year += 1;
+      }
+      // Last day of next month
+      const lastDayOfNextMonth = new Date(year, month, 0).getDate();
+      return `${year}-${String(month).padStart(2, '0')}-${String(lastDayOfNextMonth).padStart(2, '0')}`;
+    }
+
+    function escapeHtml(str) {
+      return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+    }
+
+    function showToast(msg) {
+      const toast = document.getElementById('toast');
+      toast.textContent = msg;
+      toast.classList.remove('translate-y-20', 'opacity-0');
+      setTimeout(() => {
+        toast.classList.add('translate-y-20', 'opacity-0');
+      }, 2800);
+    }
+
+    let pendingConfirmCallback = null;
+    function showConfirmDialog(title, message, onConfirm) {
+      document.getElementById('confirmTitle').textContent = title;
+      document.getElementById('confirmMessage').textContent = message;
+      pendingConfirmCallback = onConfirm;
+      const dialog = document.getElementById('confirmDialog');
+      dialog.classList.remove('hidden');
+      dialog.classList.add('flex');
+    }
+
+    function closeConfirmDialog() {
+      const dialog = document.getElementById('confirmDialog');
+      dialog.classList.add('hidden');
+      dialog.classList.remove('flex');
+      pendingConfirmCallback = null;
+    }
+
+    document.getElementById('confirmActionBtn').addEventListener('click', () => {
+      if (pendingConfirmCallback) pendingConfirmCallback();
+      closeConfirmDialog();
+    });
+
+    // Expose functions to global window for inline HTML handlers
+    window.openColumnModal = openColumnModal;
+    window.closeColumnModal = closeColumnModal;
+    window.toggleColAddMode = toggleColAddMode;
+    window.updateExistingBankPreview = updateExistingBankPreview;
+    window.handleAddColumn = handleAddColumn;
+    window.removeCustomColumn = removeCustomColumn;
+    window.openRecordModal = openRecordModal;
+    window.closeRecordModal = closeRecordModal;
+    window.prefillFromLatest = prefillFromLatest;
+    window.updateLiveFinalPreview = updateLiveFinalPreview;
+    window.saveRecord = saveRecord;
+    window.editRecord = editRecord;
+    window.deleteRecord = deleteRecord;
+    window.clearRecordsOnly = clearRecordsOnly;
+    window.confirmFullReset = confirmFullReset;
+    window.exportCSV = exportCSV;
+    window.exportExcelFile = exportExcelFile;
+    window.importCSV = importCSV;
+    window.importFileHandler = importFileHandler;
+    window.syncToGoogleDriveScript = syncToGoogleDriveScript;
+    window.loadFromGoogleDriveScript = loadFromGoogleDriveScript;
+    window.copyAppsScriptCode = copyAppsScriptCode;
+    window.openGDriveSetupModal = openGDriveSetupModal;
+    window.closeGDriveSetupModal = closeGDriveSetupModal;
+    window.saveGDriveConfigAndConnect = saveGDriveConfigAndConnect;
+    window.disconnectGoogleDrive = disconnectGoogleDrive;
+    window.closeConfirmDialog = closeConfirmDialog;
+
+    window.addEventListener('DOMContentLoaded', initApp);
+  </script>
+</body>
+</html>
